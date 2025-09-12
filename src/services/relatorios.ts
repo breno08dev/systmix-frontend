@@ -1,14 +1,9 @@
 import { supabase } from '../lib/supabase';
 import { RelatorioVendas } from '../types';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
-// Adiciona a definição de tipo para a função autoTable, que é uma extensão do jspdf
-declare module 'jspdf' {
-  interface jsPDF {
-    autoTable: (options: any) => jsPDF;
-  }
-}
+// Remove a declaração de módulo pois não é mais necessária
 
 // Função auxiliar para buscar os dados detalhados para o PDF
 const obterDadosDetalhadosParaPDF = async (dataInicio: string, dataFim: string) => {
@@ -89,7 +84,7 @@ export const relatoriosService = {
     doc.setTextColor(100);
     doc.text(`Período de ${dataInicioFormatada} a ${dataFimFormatada}`, 14, 29);
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: 40,
       head: [['Resumo do Período']],
       body: [
@@ -117,8 +112,8 @@ export const relatoriosService = {
       })
     );
 
-    doc.autoTable({
-      startY: (doc as any).lastAutoTable.finalY + 10,
+    autoTable(doc, {
+      startY: (doc as any).autoTable.previous.finalY + 10,
       head: [['Comanda', 'Cliente', 'Data', 'Item', 'Qtd', 'Vlr. Unit.', 'Total Item']],
       body: corpoTabela,
       theme: 'striped',

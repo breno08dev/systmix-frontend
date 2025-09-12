@@ -11,6 +11,7 @@ export const PDV: React.FC = () => {
   const [comandasAbertas, setComandasAbertas] = useState<Comanda[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [atualizando, setAtualizando] = useState(false);
   
   const [comandaSelecionada, setComandaSelecionada] = useState<Comanda | null>(null);
   const [numeroParaAbrir, setNumeroParaAbrir] = useState<number | null>(null);
@@ -20,6 +21,9 @@ export const PDV: React.FC = () => {
   }, []);
 
   const carregarDados = async () => {
+    if (atualizando) return; // Evita múltiplas chamadas simultâneas
+    
+    setAtualizando(true);
     try {
       const [comandasData, produtosData, clientesData] = await Promise.all([
         comandasService.listarAbertas(),
@@ -30,13 +34,10 @@ export const PDV: React.FC = () => {
       setProdutos(produtosData);
       setClientes(clientesData);
 
-      // Se uma comanda estava selecionada, atualiza seu estado também
-      if (comandaSelecionada) {
-        const comandaAtualizada = comandasData.find(c => c.id === comandaSelecionada.id);
-        setComandaSelecionada(comandaAtualizada || null);
-      }
     } catch (error) {
       console.error('Erro ao recarregar dados:', error);
+    } finally {
+      setAtualizando(false);
     }
   };
 
@@ -55,16 +56,24 @@ export const PDV: React.FC = () => {
       setNumeroParaAbrir(null);
       await carregarDados();
       
+      // Busca a comanda recém-criada com todos os dados
       const comandaRecemCriada = await comandasService.buscarPorNumero(novaComanda.numero);
-      setComandaSelecionada(comandaRecemCriada);
+      if (comandaRecemCriada) {
+        setComandaSelecionada(comandaRecemCriada);
+      }
     } catch (error) {
       console.error('Erro ao confirmar abertura da comanda:', error);
+      alert('Erro ao abrir comanda. Tente novamente.');
     }
   };
 
   const handleFecharModal = () => {
     setComandaSelecionada(null);
-    carregarDados(); // Apenas recarrega os dados ao fechar
+    carregarDados(); // Recarrega os dados ao fechar
+  };
+
+  const handleComandaAtualizada = () => {
+    carregarDados(); // Recarrega a lista de comandas quando uma é atualizada
   };
 
   const calcularTotalComanda = (comanda: Comanda) => {
@@ -155,6 +164,7 @@ export const PDV: React.FC = () => {
           comandaInicial={comandaSelecionada}
           produtos={produtos}
           onClose={handleFecharModal}
+          onComandaAtualizada={handleComandaAtualizada}
         />
       )}
     </div>

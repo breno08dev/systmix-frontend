@@ -29,11 +29,11 @@ export const comandasService = {
         itens:itens_comanda(
           *,
           produto:produtos(*)
-        ),
-        pagamentos(*)
+        )
       `)
       .eq('numero', numero)
       .eq('status', 'aberta')
+      .order('itens.criado_em', { ascending: true })
       .single();
     
     if (error && error.code !== 'PGRST116') throw error;
@@ -85,24 +85,43 @@ export const comandasService = {
   },
 
   async fecharComanda(idComanda: string, pagamentos: Omit<Pagamento, 'id' | 'data'>[]): Promise<void> {
-    // Atualizar status da comanda
-    const { error: updateError } = await supabase
-      .from('comandas')
-      .update({
-        status: 'fechada',
-        fechado_em: new Date().toISOString()
-      })
-      .eq('id', idComanda);
-    
-    if (updateError) throw updateError;
-
-    // Inserir pagamentos
-    if (pagamentos.length > 0) {
-      const { error: paymentError } = await supabase
-        .from('pagamentos')
-        .insert(pagamentos);
+    try {
+      // Verificar se a comanda ainda está aberta
+      const { data: comanda, error: checkError } = await supabase
+        .from('comandas')
+        .select('status')
+        .eq('id', idComanda)
+        .single();
       
-      if (paymentError) throw paymentError;
+      if (checkError) throw checkError;
+      
+      if (comanda.status !== 'aberta') {
+        throw new Error('Esta comanda já foi fechada');
+      }
+
+      // Inserir pagamentos primeiro
+      if (pagamentos.length > 0) {
+        const { error: paymentError } = await supabase
+          .from('pagamentos')
+          .insert(pagamentos);
+        
+        if (paymentError) throw paymentError;
+      }
+
+      // Atualizar status da comanda
+      const { error: updateError } = await supabase
+        .from('comandas')
+        .update({
+          status: 'fechada',
+          fechado_em: new Date().toISOString()
+        })
+        .eq('id', idComanda);
+      
+      if (updateError) throw updateError;
+      
+    } catch (error) {
+      console.error('Erro ao fechar comanda:', error);
+      throw error;
     }
   }
 };

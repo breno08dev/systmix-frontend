@@ -45,6 +45,14 @@ export const Dashboard: React.FC = () => {
 
     } catch (error) {
       console.error('Erro ao carregar dados do dashboard:', error);
+      // Em caso de erro, define valores padrão para evitar quebrar a interface
+      setStats({
+        comandasAbertas: 0,
+        totalProdutos: 0,
+        totalClientes: 0,
+        faturamentoDia: 0
+      });
+      setComandasRecentes([]);
     }
   };
 

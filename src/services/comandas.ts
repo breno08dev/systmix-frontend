@@ -33,7 +33,7 @@ export const comandasService = {
       `)
       .eq('numero', numero)
       .eq('status', 'aberta')
-      .order('itens.criado_em', { ascending: true })
+      .order('criado_em', { ascending: true, foreignTable: 'itens' })
       .single();
     
     if (error && error.code !== 'PGRST116') throw error;

@@ -3,8 +3,7 @@ import { RelatorioVendas } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// ... (código existente da função obterDadosDetalhadosParaPDF)
-
+// Função auxiliar para buscar os dados detalhados para o PDF
 const obterDadosDetalhadosParaPDF = async (dataInicio: string, dataFim: string) => {
   const { data, error } = await supabase
     .from('comandas')
@@ -25,9 +24,7 @@ const obterDadosDetalhadosParaPDF = async (dataInicio: string, dataFim: string) 
   return data || [];
 };
 
-
 export const relatoriosService = {
-  // ... (código existente da função obterFaturamentoHoje)
   async obterFaturamentoHoje(): Promise<number> {
     const hoje = new Date();
     const dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).toISOString();
@@ -40,7 +37,6 @@ export const relatoriosService = {
   },
 
   async obterVendasPorPeriodo(dataInicio: string, dataFim: string): Promise<RelatorioVendas> {
-    // MODIFICAÇÃO: Buscando também o método de pagamento
     const { data: pagamentos, error: pagamentosError } = await supabase
       .from('pagamentos')
       .select('valor, metodo')
@@ -68,7 +64,6 @@ export const relatoriosService = {
 
     const itemMaisVendido = Object.entries(itemCount).sort(([, a], [, b]) => b - a)[0]?.[0] || 'Nenhum';
     
-    // NOVO: Agrupando pagamentos por método
     const pagamentosPorMetodo = (pagamentos || []).reduce((acc, pag) => {
       acc[pag.metodo] = (acc[pag.metodo] || 0) + pag.valor;
       return acc;
@@ -80,26 +75,32 @@ export const relatoriosService = {
       item_mais_vendido: itemMaisVendido,
       ticket_medio: ticketMedio,
       media_itens_comanda: mediaItensComanda,
-      // NOVO: Convertendo para o formato de array esperado
       pagamentos_por_metodo: Object.entries(pagamentosPorMetodo).map(([metodo, total]) => ({
-        metodo: metodo.charAt(0).toUpperCase() + metodo.slice(1), // Capitaliza o método
+        metodo: metodo.charAt(0).toUpperCase() + metodo.slice(1),
         total,
       })),
     };
   },
 
-  // ... (código existente da função exportarVendasPDF)
   async exportarVendasPDF(relatorio: RelatorioVendas, dataInicio: string, dataFim: string): Promise<void> {
     const dadosDetalhados = await obterDadosDetalhadosParaPDF(dataInicio, dataFim);
     
     const doc = new jsPDF();
-    const dataInicioFormatada = new Date(`${dataInicio}T12:00:00`).toLocaleDateString('pt-BR');
-    const dataFimFormatada = new Date(`${dataFim}T12:00:00`).toLocaleDateString('pt-BR');
+    
+    // CORREÇÃO: Função para formatar a data de forma segura
+    const formatarData = (dataString: string) => {
+      const [ano, mes, dia] = dataString.split('T')[0].split('-');
+      return `${dia}/${mes}/${ano}`;
+    };
+
+    const dataInicioFormatada = formatarData(dataInicio);
+    const dataFimFormatada = formatarData(dataFim);
 
     doc.setFontSize(18);
     doc.text('Relatório de Vendas', 14, 22);
     doc.setFontSize(11);
     doc.setTextColor(100);
+    // Agora o texto usará as datas formatadas corretamente
     doc.text(`Período de ${dataInicioFormatada} a ${dataFimFormatada}`, 14, 29);
 
     autoTable(doc, {
@@ -131,7 +132,6 @@ export const relatoriosService = {
     );
 
     autoTable(doc, {
-      // CORREÇÃO: A propriedade correta é `lastAutoTable.finalY`
       startY: (doc as any).lastAutoTable.finalY + 10,
       head: [['Comanda', 'Cliente', 'Data', 'Item', 'Qtd', 'Vlr. Unit.', 'Total Item']],
       body: corpoTabela,

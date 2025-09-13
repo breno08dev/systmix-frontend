@@ -10,14 +10,13 @@ interface ComandaModalProps {
   comandaInicial: Comanda;
   produtos: Produto[];
   onClose: () => void;
-  onComandaAtualizada: () => void;
+  // A prop 'onComandaAtualizada' foi removida para evitar o bug
 }
 
 export const ComandaModal: React.FC<ComandaModalProps> = ({
   comandaInicial,
   produtos,
   onClose,
-  onComandaAtualizada,
 }) => {
   const [comandaAtual, setComandaAtual] = useState<Comanda>(comandaInicial);
   const [produtoSelecionado, setProdutoSelecionado] = useState<string>('');
@@ -33,27 +32,13 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
     setComandaAtual(comandaInicial);
   }, [comandaInicial]);
 
-  // Total da comanda recalculado em tempo real
   const totalComanda = React.useMemo(() => {
     return comandaAtual.itens?.reduce((total, item) => total + item.quantidade * item.valor_unit, 0) || 0;
   }, [comandaAtual.itens]);
 
-  const handlePrint = useReactToPrint({
+const handlePrint = useReactToPrint({
     contentRef: comprovanteRef,
   });
-
-  const atualizarComandaDoBanco = async () => {
-    try {
-      const comandaAtualizada = await comandasService.buscarPorNumero(comandaAtual.numero);
-      if (comandaAtualizada) {
-        setComandaAtual(comandaAtualizada);
-        onComandaAtualizada();
-      }
-    } catch (error) {
-      console.error('Erro ao atualizar comanda do banco:', error);
-      addToast('Erro ao sincronizar comanda.', 'error');
-    }
-  };
 
   const adicionarProduto = async () => {
     if (!produtoSelecionado || carregando) return;
@@ -66,13 +51,16 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
     } else {
       setCarregando(true);
       try {
-        await comandasService.adicionarItem({
+        const novoItem = await comandasService.adicionarItem({
           id_comanda: comandaAtual.id,
           id_produto: produto.id,
           quantidade: 1,
           valor_unit: produto.preco,
         });
-        await atualizarComandaDoBanco();
+        // Atualiza o estado local com os dados do banco
+        const comandaDoBanco = await comandasService.buscarPorNumero(comandaAtual.numero);
+        if (comandaDoBanco) setComandaAtual(comandaDoBanco);
+        
         setProdutoSelecionado('');
       } catch (error) {
         console.error('Erro ao adicionar produto:', error);
@@ -83,25 +71,21 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
     }
   };
 
-  // Atualiza quantidade no estado local antes de chamar API
   const alterarQuantidade = async (itemId: string, novaQuantidade: number) => {
-    if (novaQuantidade < 1) {
-      return removerItem(itemId);
-    }
+    if (novaQuantidade < 1) return removerItem(itemId);
 
     let comandaOriginal: Comanda | null = null;
 
-    setComandaAtual(prev => {
-      comandaOriginal = prev;
-      const novosItens = prev.itens?.map(item =>
+    setComandaAtual(currentState => {
+      comandaOriginal = currentState;
+      const novosItens = currentState.itens?.map(item =>
         item.id === itemId ? { ...item, quantidade: novaQuantidade } : item
-      ) || [];
-      return { ...prev, itens: novosItens };
+      );
+      return { ...currentState, itens: novosItens };
     });
 
     try {
       await comandasService.atualizarQuantidadeItem(itemId, novaQuantidade);
-      onComandaAtualizada();
     } catch (error) {
       console.error('Erro ao alterar quantidade:', error);
       addToast('Erro ao atualizar. Desfazendo alteração.', 'error');
@@ -109,19 +93,17 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
     }
   };
 
-  // Remove item e atualiza estado local
   const removerItem = async (itemId: string) => {
     let comandaOriginal: Comanda | null = null;
 
-    setComandaAtual(prev => {
-      comandaOriginal = prev;
-      const novosItens = prev.itens?.filter(item => item.id !== itemId) || [];
-      return { ...prev, itens: novosItens };
+    setComandaAtual(currentState => {
+      comandaOriginal = currentState;
+      const novosItens = currentState.itens?.filter(item => item.id !== itemId);
+      return { ...currentState, itens: novosItens };
     });
 
     try {
       await comandasService.removerItem(itemId);
-      onComandaAtualizada();
     } catch (error) {
       console.error('Erro ao remover item:', error);
       addToast('Erro ao remover. Desfazendo alteração.', 'error');
@@ -147,8 +129,7 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
         valor: totalComanda,
       }]);
       addToast('Comanda fechada com sucesso!', 'success');
-      onComandaAtualizada();
-      onClose();
+      onClose(); // Apenas fecha o modal. O PDV vai recarregar a lista.
     } catch (error) {
       console.error('Erro ao fechar comanda:', error);
       addToast('Não foi possível fechar a comanda.', 'error');
@@ -173,6 +154,7 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
       </div>
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
+          {/* O restante do JSX do modal permanece o mesmo */}
           <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Comanda {comandaAtual.numero}</h2>

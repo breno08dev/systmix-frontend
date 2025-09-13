@@ -15,7 +15,7 @@ export const Comprovante = React.forwardRef<HTMLDivElement, ComprovanteProps>((p
     // A 'ref' é anexada a este <div>, que é o container que será impresso.
     <div ref={ref} className="p-4 font-mono text-xs text-black">
       <div className="text-center mb-4">
-        <h1 className="text-base font-bold">BarManager</h1>
+        <h1 className="text-base font-bold">NextSys - Sistema de Gerenciamento de Bares</h1>
         <p>Comprovante de Consumo - Não Fiscal</p>
       </div>
       <div className="mb-2">

@@ -32,11 +32,17 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
 
   return (
     <div className="min-h-screen bg-secondary flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-sm">
+      {/* Card branco responsivo */}
+      <div className="bg-white rounded-lg shadow-xl p-10 w-full max-w-md md:max-w-lg lg:max-w-xl">
         
         {/* Logo centralizada */}
-        <div className="text-center mb-10">
-          <img src="/logo.nexts.png" alt="Logo SystMix" className="w-45 mx-auto" />
+        <div className="text-center mb-6">
+          <img 
+            src="/nexts.logo1.png" 
+            alt="Logo NextSys" 
+            className="w-72 h-auto mx-auto" 
+          />
+          <p className="mt-2 text-gray-600 text-base">Sistema de Gerenciamento</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">

@@ -22,7 +22,6 @@ export const PDV: React.FC = () => {
 
   const carregarDados = async () => {
     if (atualizando) return;
-    
     setAtualizando(true);
     try {
       const [comandasData, produtosData, clientesData] = await Promise.all([
@@ -33,7 +32,6 @@ export const PDV: React.FC = () => {
       setComandasAbertas(comandasData);
       setProdutos(produtosData);
       setClientes(clientesData);
-
     } catch (error) {
       console.error('Erro ao recarregar dados:', error);
     } finally {
@@ -66,12 +64,9 @@ export const PDV: React.FC = () => {
     }
   };
 
+  // AGORA SÓ RECARREGA OS DADOS QUANDO O MODAL É FECHADO
   const handleFecharModal = () => {
     setComandaSelecionada(null);
-    carregarDados();
-  };
-
-  const handleComandaAtualizada = () => {
     carregarDados();
   };
 
@@ -91,6 +86,7 @@ export const PDV: React.FC = () => {
       <div className="bg-white rounded-lg shadow-md mb-8">
         <div className="p-6 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-xl font-bold text-gray-900">Comandas Abertas</h2>
+          {/* CÓDIGO CORRIGIDO PARA O CONTADOR */}
           <div className="text-sm text-gray-500">{comandasAbertas.length} comandas ativas</div>
         </div>
         
@@ -163,7 +159,6 @@ export const PDV: React.FC = () => {
           comandaInicial={comandaSelecionada}
           produtos={produtos}
           onClose={handleFecharModal}
-          onComandaAtualizada={handleComandaAtualizada}
         />
       )}
     </div>

@@ -3,7 +3,7 @@ import { Plus, Users, Phone, Calendar, Trash2 } from 'lucide-react';
 import { clientesService } from '../../services/clientes';
 import { Cliente } from '../../types';
 import { ClienteModal } from './ClienteModal';
-import { ConfirmacaoModal } from '../Common/ConfirmacaoModal'; // Importar o novo modal
+import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
 
 export const Clientes: React.FC = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -11,7 +11,6 @@ export const Clientes: React.FC = () => {
   const [clienteEdicao, setClienteEdicao] = useState<Cliente | null>(null);
   const [busca, setBusca] = useState('');
   
-  // Estados para controlar o modal de confirmação de exclusão
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false);
   const [clienteParaExcluir, setClienteParaExcluir] = useState<Cliente | null>(null);
 
@@ -39,14 +38,12 @@ export const Clientes: React.FC = () => {
     setModalAberto(true);
   };
 
-  // Abre o modal de confirmação
   const handleAbrirModalExcluir = (evento: React.MouseEvent, cliente: Cliente) => {
     evento.stopPropagation();
     setClienteParaExcluir(cliente);
     setModalExcluirAberto(true);
   };
 
-  // Executa a exclusão após confirmação
   const handleConfirmarExclusao = async () => {
     if (!clienteParaExcluir) return;
     try {
@@ -79,7 +76,7 @@ export const Clientes: React.FC = () => {
               setClienteEdicao(null);
               setModalAberto(true);
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-secondary"
           >
             <Plus size={20} />
             Novo Cliente
@@ -92,7 +89,7 @@ export const Clientes: React.FC = () => {
             placeholder="Buscar cliente por nome ou telefone..."
             value={busca}
             onChange={(e) => setBusca(e.target.value)}
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary"
           />
         </div>
       </div>
@@ -110,7 +107,7 @@ export const Clientes: React.FC = () => {
                 <div
                   key={cliente.id}
                   onClick={() => editarCliente(cliente)}
-                  className="group border border-gray-200 rounded-lg p-4 cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-colors relative"
+                  className="group border border-gray-200 rounded-lg p-4 cursor-pointer hover:border-secondary hover:bg-gray-50 transition-colors relative"
                 >
                   <button
                     onClick={(e) => handleAbrirModalExcluir(e, cliente)}

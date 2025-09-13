@@ -21,7 +21,7 @@ export const PDV: React.FC = () => {
   }, []);
 
   const carregarDados = async () => {
-    if (atualizando) return; // Evita múltiplas chamadas simultâneas
+    if (atualizando) return;
     
     setAtualizando(true);
     try {
@@ -56,7 +56,6 @@ export const PDV: React.FC = () => {
       setNumeroParaAbrir(null);
       await carregarDados();
       
-      // Busca a comanda recém-criada com todos os dados
       const comandaRecemCriada = await comandasService.buscarPorNumero(novaComanda.numero);
       if (comandaRecemCriada) {
         setComandaSelecionada(comandaRecemCriada);
@@ -69,11 +68,11 @@ export const PDV: React.FC = () => {
 
   const handleFecharModal = () => {
     setComandaSelecionada(null);
-    carregarDados(); // Recarrega os dados ao fechar
+    carregarDados();
   };
 
   const handleComandaAtualizada = () => {
-    carregarDados(); // Recarrega a lista de comandas quando uma é atualizada
+    carregarDados();
   };
 
   const calcularTotalComanda = (comanda: Comanda) => {
@@ -104,10 +103,10 @@ export const PDV: React.FC = () => {
                 <div
                   key={comanda.id}
                   onClick={() => handleAbrirOuEditarComanda(comanda.numero)}
-                  className="border-2 border-gray-200 rounded-lg p-4 cursor-pointer hover:border-amber-400 hover:bg-amber-50 transition-colors"
+                  className="border-2 border-gray-200 rounded-lg p-4 cursor-pointer hover:border-secondary hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <div className="w-8 h-8 bg-amber-500 text-white rounded-full flex items-center justify-center font-bold text-sm">{comanda.numero}</div>
+                    <div className="w-8 h-8 bg-primary text-white rounded-full flex items-center justify-center font-bold text-sm">{comanda.numero}</div>
                     <div className="flex items-center gap-1 text-gray-500">
                       <ShoppingCart size={16} />
                       <span className="text-sm">{comanda.itens?.length || 0}</span>

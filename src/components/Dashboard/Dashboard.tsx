@@ -3,7 +3,7 @@ import { Receipt, Package, Users, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { comandasService } from '../../services/comandas';
 import { produtosService } from '../../services/produtos';
 import { clientesService } from '../../services/clientes';
-import { relatoriosService } from '../../services/relatorios'; // Importado
+import { relatoriosService } from '../../services/relatorios'; 
 import { Comanda } from '../../types';
 
 export const Dashboard: React.FC = () => {
@@ -14,7 +14,7 @@ export const Dashboard: React.FC = () => {
     faturamentoDia: 0
   });
   const [comandasRecentes, setComandasRecentes] = useState<Comanda[]>([]);
-  const [faturamentoVisivel, setFaturamentoVisivel] = useState(true); // Estado para controlar a visibilidade
+  const [faturamentoVisivel, setFaturamentoVisivel] = useState(true);
 
   useEffect(() => {
     carregarDados();
@@ -22,12 +22,11 @@ export const Dashboard: React.FC = () => {
 
   const carregarDados = async () => {
     try {
-      // Busca todos os dados em paralelo
       const [comandas, produtos, clientes, faturamentoHoje] = await Promise.all([
         comandasService.listarAbertas(),
         produtosService.listar(),
         clientesService.listar(),
-        relatoriosService.obterFaturamentoHoje() // Usando a nova função
+        relatoriosService.obterFaturamentoHoje()
       ]);
 
       setStats({
@@ -37,7 +36,6 @@ export const Dashboard: React.FC = () => {
         faturamentoDia: faturamentoHoje
       });
 
-      // Ordena as comandas por data de criação para mostrar as mais recentes
       const comandasOrdenadas = comandas.sort((a, b) => 
         new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime()
       );
@@ -45,7 +43,6 @@ export const Dashboard: React.FC = () => {
 
     } catch (error) {
       console.error('Erro ao carregar dados do dashboard:', error);
-      // Em caso de erro, define valores padrão para evitar quebrar a interface
       setStats({
         comandasAbertas: 0,
         totalProdutos: 0,
@@ -58,11 +55,11 @@ export const Dashboard: React.FC = () => {
 
   const StatCard: React.FC<{
     title: string;
-    value: string | number; // Alterado para aceitar string
+    value: string | number;
     icon: React.ElementType;
     color: string;
-    onToggleVisibility?: () => void; // Prop opcional para o botão de visibilidade
-    isVisibilityToggleable?: boolean; // Prop para saber se o card tem o botão
+    onToggleVisibility?: () => void;
+    isVisibilityToggleable?: boolean;
   }> = ({ title, value, icon: Icon, color, onToggleVisibility, isVisibilityToggleable }) => (
     <div className="bg-white rounded-lg shadow-md p-6">
       <div className="flex items-center justify-between">
@@ -114,7 +111,7 @@ export const Dashboard: React.FC = () => {
           title="Faturamento Hoje"
           value={faturamentoVisivel ? `R$ ${stats.faturamentoDia.toFixed(2)}` : 'R$ ****'}
           icon={TrendingUp}
-          color="bg-amber-500"
+          color="bg-primary"
           isVisibilityToggleable={true}
           onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}
         />
@@ -132,7 +129,7 @@ export const Dashboard: React.FC = () => {
               {comandasRecentes.map(comanda => (
                 <div key={comanda.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                   <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-amber-500 text-white rounded-full flex items-center justify-center font-bold">
+                    <div className="w-12 h-12 bg-secondary text-white rounded-full flex items-center justify-center font-bold">
                       {comanda.numero}
                     </div>
                     <div>

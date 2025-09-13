@@ -1,6 +1,6 @@
 # SystMix - Sistema de Gestão para Bares e Lanchonetes
 
-![SystMix Logo](logo.png) 
+![SystMix Logo](logo.nexts.png) 
 
 ## Descrição
 O **SystMix** é um sistema completo de gestão para bares e lanchonetes, desenvolvido para otimizar o atendimento e o controle de vendas. Com ele, é possível gerenciar comandas, produtos, clientes e relatórios de forma prática, rápida e eficiente, tudo em uma interface moderna e responsiva.

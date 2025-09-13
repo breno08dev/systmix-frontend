@@ -23,6 +23,21 @@ export const produtosService = {
     return data || [];
   },
 
+  // NOVA FUNÇÃO para verificar se o produto está em uso
+  async verificarUsoProduto(id: string): Promise<boolean> {
+    const { count, error } = await supabase
+      .from('itens_comanda')
+      .select('*', { count: 'exact', head: true })
+      .eq('id_produto', id);
+
+    if (error) {
+      console.error('Erro ao verificar uso do produto:', error);
+      throw error;
+    }
+
+    return (count || 0) > 0;
+  },
+
   async criar(produto: Omit<Produto, 'id' | 'criado_em'>): Promise<Produto> {
     const { data, error } = await supabase
       .from('produtos')

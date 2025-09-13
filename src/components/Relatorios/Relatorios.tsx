@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Download, TrendingUp, Receipt, Star, DollarSign } from 'lucide-react';
+import { Calendar, Download, TrendingUp, Receipt, Star, DollarSign, Wallet } from 'lucide-react';
 import { relatoriosService } from '../../services/relatorios';
 import { RelatorioVendas } from '../../types';
 
@@ -9,9 +9,15 @@ export const Relatorios: React.FC = () => {
   const [relatorio, setRelatorio] = useState<RelatorioVendas | null>(null);
   const [carregando, setCarregando] = useState(false);
 
+  // Função para formatar a data sem problemas de timezone
+  const formatarData = (dataString: string) => {
+    const [ano, mes, dia] = dataString.split('-');
+    return `${dia}/${mes}/${ano}`;
+  };
+
   const gerarRelatorio = async () => {
     setCarregando(true);
-    setRelatorio(null); // Limpa o relatório antigo
+    setRelatorio(null);
     try {
       const data = await relatoriosService.obterVendasPorPeriodo(
         `${dataInicio}T00:00:00`,
@@ -71,14 +77,14 @@ export const Relatorios: React.FC = () => {
         <div className="flex flex-wrap items-end gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Data Início</label>
-            <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"/>
+            <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary"/>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Data Fim</label>
-            <input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"/>
+            <input type="date" value={dataFim} onChange={(e) => setDataFim(e.target.value)} className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary"/>
           </div>
           <div className="flex gap-2">
-            <button onClick={gerarRelatorio} disabled={carregando} className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:bg-gray-300">
+            <button onClick={gerarRelatorio} disabled={carregando} className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-secondary disabled:bg-gray-300">
               {carregando ? 'Gerando...' : 'Gerar Relatório'}
             </button>
             {relatorio && (
@@ -97,7 +103,7 @@ export const Relatorios: React.FC = () => {
             <StatCard title="Total de Vendas" value={`R$ ${relatorio.total_vendas.toFixed(2)}`} icon={DollarSign} color="bg-green-500"/>
             <StatCard title="Total de Comandas" value={relatorio.total_comandas} icon={Receipt} color="bg-blue-500"/>
             <StatCard title="Ticket Médio" value={`R$ ${relatorio.ticket_medio.toFixed(2)}`} icon={TrendingUp} color="bg-purple-500"/>
-            <StatCard title="Item Mais Vendido" value={relatorio.item_mais_vendido} icon={Star} color="bg-amber-500"/>
+            <StatCard title="Item Mais Vendido" value={relatorio.item_mais_vendido} icon={Star} color="bg-primary"/>
           </div>
           <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-xl font-bold text-gray-900 mb-4">Resumo do Período</h2>
@@ -105,7 +111,8 @@ export const Relatorios: React.FC = () => {
               <div>
                 <h3 className="font-medium text-gray-700 mb-2">Desempenho</h3>
                 <ul className="space-y-2 text-sm text-gray-600">
-                  <li>• Período: {new Date(`${dataInicio}T12:00:00`).toLocaleDateString('pt-BR')} a {new Date(`${dataFim}T12:00:00`).toLocaleDateString('pt-BR')}</li>
+                  {/* CORREÇÃO DA DATA */}
+                  <li>• Período: {formatarData(dataInicio)} a {formatarData(dataFim)}</li>
                   <li>• Total arrecadado: R$ {relatorio.total_vendas.toFixed(2)}</li>
                   <li>• Comandas fechadas: {relatorio.total_comandas}</li>
                   <li>• Valor médio por comanda: R$ {relatorio.ticket_medio.toFixed(2)}</li>
@@ -121,6 +128,25 @@ export const Relatorios: React.FC = () => {
               </div>
             </div>
           </div>
+          
+          {/* NOVO CARD DE PAGAMENTOS */}
+          {relatorio.pagamentos_por_metodo.length > 0 && (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <Wallet size={20} className="text-gray-600" />
+                <h2 className="text-xl font-bold text-gray-900">Resumo de Pagamentos</h2>
+              </div>
+              <div className="space-y-2">
+                {relatorio.pagamentos_por_metodo.map(pagamento => (
+                  <div key={pagamento.metodo} className="flex justify-between items-center text-sm text-gray-600">
+                    <span>• {pagamento.metodo}</span>
+                    <span className="font-medium">R$ {pagamento.total.toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
         </div>
       )}
       {!relatorio && !carregando && (

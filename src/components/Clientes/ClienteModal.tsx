@@ -71,7 +71,7 @@ export const ClienteModal: React.FC<ClienteModalProps> = ({
               type="text"
               value={formData.nome}
               onChange={(e) => handleChange('nome', e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary"
               required
             />
           </div>
@@ -81,7 +81,7 @@ export const ClienteModal: React.FC<ClienteModalProps> = ({
               type="tel"
               value={formData.telefone}
               onChange={(e) => handleChange('telefone', e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary"
               placeholder="(11) 99999-9999"
             />
           </div>
@@ -96,7 +96,7 @@ export const ClienteModal: React.FC<ClienteModalProps> = ({
             </button>
             <button
               type="submit"
-              className="flex-1 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600"
+              className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-secondary"
             >
               {cliente ? 'Salvar Alterações' : 'Criar Cliente'}
             </button>

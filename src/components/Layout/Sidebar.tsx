@@ -1,11 +1,10 @@
 import React from 'react';
-import { 
-  Home, 
-  Receipt, 
-  Package, 
-  Users, 
-  BarChart3, 
-  Settings,
+import {
+  Home,
+  Receipt,
+  Package,
+  Users,
+  BarChart3,
   LogOut
 } from 'lucide-react';
 
@@ -29,9 +28,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <div className="w-64 bg-gray-900 text-white h-screen flex flex-col">
-      <div className="p-6 border-b border-gray-700">
-        <h1 className="text-2xl font-bold text-amber-400">SystMix</h1>
+    <div className="w-64 bg-primary text-white h-screen flex flex-col">
+      <div className="p-6 border-b border-secondary">
+        <h1 className="text-2xl font-bold text-white">NextSys</h1>
       </div>
       
       <nav className="flex-1 p-4">
@@ -44,8 +43,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => onSectionChange(item.id)}
                   className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors ${
                     activeSection === item.id
-                      ? 'bg-amber-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                      ? 'bg-accent text-white'
+                      : 'text-gray-300 hover:bg-secondary hover:text-white'
                   }`}
                 >
                   <Icon size={20} />
@@ -57,7 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </ul>
       </nav>
       
-      <div className="p-4 border-t border-gray-700">
+      <div className="p-4 border-t border-secondary">
         <button
           onClick={onLogout}
           className="w-full flex items-center gap-3 p-3 text-gray-300 hover:bg-red-600 hover:text-white rounded-lg transition-colors"

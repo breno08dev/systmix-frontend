@@ -83,7 +83,7 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
                 <div
                   key={cliente.id}
                   onClick={() => setClienteSelecionado(cliente)}
-                  className={`p-3 cursor-pointer hover:bg-amber-50 ${clienteSelecionado?.id === cliente.id ? 'bg-amber-100' : ''}`}
+                  className={`p-3 cursor-pointer hover:bg-gray-100 ${clienteSelecionado?.id === cliente.id ? 'bg-gray-200' : ''}`}
                 >
                   <p className="font-medium">{cliente.nome}</p>
                   <p className="text-sm text-gray-500">{cliente.telefone}</p>
@@ -119,7 +119,7 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
             />
             <button
               onClick={() => setModoNovoCliente(false)}
-              className="text-sm text-amber-600 hover:underline"
+              className="text-sm text-secondary hover:underline"
             >
               Voltar para busca
             </button>
@@ -136,7 +136,7 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
           </button>
           <button
             onClick={handleAbrirComanda}
-            className="flex-1 py-3 bg-amber-500 text-white rounded-lg hover:bg-amber-600 font-medium"
+            className="flex-1 py-3 bg-primary text-white rounded-lg hover:bg-secondary font-medium"
           >
             {modoNovoCliente ? 'Criar e Abrir' : 'Abrir Comanda'}
           </button>

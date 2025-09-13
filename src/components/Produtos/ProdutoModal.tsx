@@ -99,7 +99,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               type="text"
               value={formData.nome}
               onChange={(e) => handleChange('nome', e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
               required
             />
           </div>
@@ -113,7 +113,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               list="categorias"
               value={formData.categoria}
               onChange={(e) => handleChange('categoria', e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
               required
             />
             <datalist id="categorias">
@@ -133,7 +133,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               min="0"
               value={formData.preco}
               onChange={(e) => handleChange('preco', e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
               required
             />
           </div>
@@ -144,7 +144,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               id="ativo"
               checked={formData.ativo}
               onChange={(e) => handleChange('ativo', e.target.checked)}
-              className="rounded border-gray-300 focus:ring-amber-500"
+              className="rounded border-gray-300 focus:ring-secondary"
             />
             <label htmlFor="ativo" className="text-sm font-medium text-gray-700">
               Produto ativo
@@ -161,7 +161,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
             </button>
             <button
               type="submit"
-              className="flex-1 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600"
+              className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-secondary"
             >
               {produto ? 'Salvar' : 'Criar'}
             </button>

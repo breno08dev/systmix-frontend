@@ -3,9 +3,8 @@ import { RelatorioVendas } from '../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Remove a declaração de módulo pois não é mais necessária
+// ... (código existente da função obterDadosDetalhadosParaPDF)
 
-// Função auxiliar para buscar os dados detalhados para o PDF
 const obterDadosDetalhadosParaPDF = async (dataInicio: string, dataFim: string) => {
   const { data, error } = await supabase
     .from('comandas')
@@ -26,7 +25,9 @@ const obterDadosDetalhadosParaPDF = async (dataInicio: string, dataFim: string) 
   return data || [];
 };
 
+
 export const relatoriosService = {
+  // ... (código existente da função obterFaturamentoHoje)
   async obterFaturamentoHoje(): Promise<number> {
     const hoje = new Date();
     const dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).toISOString();
@@ -39,8 +40,13 @@ export const relatoriosService = {
   },
 
   async obterVendasPorPeriodo(dataInicio: string, dataFim: string): Promise<RelatorioVendas> {
-    const { data: vendas, error: vendasError } = await supabase.from('pagamentos').select('valor').gte('data', dataInicio).lte('data', dataFim);
-    if (vendasError) throw vendasError;
+    // MODIFICAÇÃO: Buscando também o método de pagamento
+    const { data: pagamentos, error: pagamentosError } = await supabase
+      .from('pagamentos')
+      .select('valor, metodo')
+      .gte('data', dataInicio)
+      .lte('data', dataFim);
+    if (pagamentosError) throw pagamentosError;
 
     const { count: totalComandas, error: comandasError } = await supabase.from('comandas').select('*', { count: 'exact', head: true }).eq('status', 'fechada').gte('fechado_em', dataInicio).lte('fechado_em', dataFim);
     if (comandasError) throw comandasError;
@@ -48,7 +54,7 @@ export const relatoriosService = {
     const { data: itens, error: itensError } = await supabase.from('itens_comanda').select(`quantidade, produto:produtos(nome), comanda:comandas!inner(fechado_em)`).gte('comanda.fechado_em', dataInicio).lte('comanda.fechado_em', dataFim);
     if (itensError) throw itensError;
 
-    const totalVendas = vendas?.reduce((sum, v) => sum + v.valor, 0) || 0;
+    const totalVendas = pagamentos?.reduce((sum, p) => sum + p.valor, 0) || 0;
     const totalItensVendidos = itens?.reduce((sum, i) => sum + i.quantidade, 0) || 0;
     const ticketMedio = totalComandas && totalComandas > 0 ? totalVendas / totalComandas : 0;
     const mediaItensComanda = totalComandas && totalComandas > 0 ? totalItensVendidos / totalComandas : 0;
@@ -61,6 +67,12 @@ export const relatoriosService = {
     });
 
     const itemMaisVendido = Object.entries(itemCount).sort(([, a], [, b]) => b - a)[0]?.[0] || 'Nenhum';
+    
+    // NOVO: Agrupando pagamentos por método
+    const pagamentosPorMetodo = (pagamentos || []).reduce((acc, pag) => {
+      acc[pag.metodo] = (acc[pag.metodo] || 0) + pag.valor;
+      return acc;
+    }, {} as Record<string, number>);
 
     return {
       total_vendas: totalVendas,
@@ -68,9 +80,15 @@ export const relatoriosService = {
       item_mais_vendido: itemMaisVendido,
       ticket_medio: ticketMedio,
       media_itens_comanda: mediaItensComanda,
+      // NOVO: Convertendo para o formato de array esperado
+      pagamentos_por_metodo: Object.entries(pagamentosPorMetodo).map(([metodo, total]) => ({
+        metodo: metodo.charAt(0).toUpperCase() + metodo.slice(1), // Capitaliza o método
+        total,
+      })),
     };
   },
 
+  // ... (código existente da função exportarVendasPDF)
   async exportarVendasPDF(relatorio: RelatorioVendas, dataInicio: string, dataFim: string): Promise<void> {
     const dadosDetalhados = await obterDadosDetalhadosParaPDF(dataInicio, dataFim);
     
@@ -113,7 +131,8 @@ export const relatoriosService = {
     );
 
     autoTable(doc, {
-      startY: (doc as any).autoTable.previous.finalY + 10,
+      // CORREÇÃO: A propriedade correta é `lastAutoTable.finalY`
+      startY: (doc as any).lastAutoTable.finalY + 10,
       head: [['Comanda', 'Cliente', 'Data', 'Item', 'Qtd', 'Vlr. Unit.', 'Total Item']],
       body: corpoTabela,
       theme: 'striped',

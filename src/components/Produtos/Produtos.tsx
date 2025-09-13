@@ -3,6 +3,8 @@ import { Plus, Edit2, Trash2, Package } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
 import { Produto } from '../../types';
 import { ProdutoModal } from './ProdutoModal';
+import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
+import { useToast } from '../../contexts/ToastContext';
 
 export const Produtos: React.FC = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -10,6 +12,11 @@ export const Produtos: React.FC = () => {
   const [produtoEdicao, setProdutoEdicao] = useState<Produto | null>(null);
   const [filtroCategoria, setFiltroCategoria] = useState<string>('');
   const [filtroAtivo, setFiltroAtivo] = useState<'todos' | 'ativo' | 'inativo'>('todos');
+
+  const [modalExcluirAberto, setModalExcluirAberto] = useState(false);
+  const [produtoParaExcluir, setProdutoParaExcluir] = useState<Produto | null>(null);
+
+  const { addToast } = useToast();
 
   useEffect(() => {
     carregarProdutos();
@@ -21,6 +28,7 @@ export const Produtos: React.FC = () => {
       setProdutos(data);
     } catch (error) {
       console.error('Erro ao carregar produtos:', error);
+      addToast('Erro ao carregar produtos.', 'error');
     }
   };
 
@@ -28,6 +36,7 @@ export const Produtos: React.FC = () => {
     carregarProdutos();
     setModalAberto(false);
     setProdutoEdicao(null);
+    addToast('Produto salvo com sucesso!', 'success');
   };
 
   const editarProduto = (produto: Produto) => {
@@ -35,23 +44,47 @@ export const Produtos: React.FC = () => {
     setModalAberto(true);
   };
 
-  const excluirProduto = async (id: string) => {
-    if (window.confirm('Tem certeza que deseja excluir este produto?')) {
-      try {
-        await produtosService.deletar(id);
-        carregarProdutos();
-      } catch (error) {
-        console.error('Erro ao excluir produto:', error);
+  const handleAbrirModalExcluir = (produto: Produto) => {
+    setProdutoParaExcluir(produto);
+    setModalExcluirAberto(true);
+  };
+
+  const handleConfirmarExclusao = async () => {
+    if (!produtoParaExcluir) return;
+
+    try {
+      const emUso = await produtosService.verificarUsoProduto(produtoParaExcluir.id);
+
+      if (emUso) {
+        // MENSAGEM DE ERRO ATUALIZADA PARA SER MAIS CLARA
+        addToast(
+          'Produto não pode ser excluído pois já faz parte de comandas. Use a opção "Inativar".',
+          'error'
+        );
+        setModalExcluirAberto(false);
+        return;
       }
+
+      await produtosService.deletar(produtoParaExcluir.id);
+      addToast('Produto excluído com sucesso!', 'success');
+      carregarProdutos();
+    } catch (error) {
+      console.error('Erro ao excluir produto:', error);
+      addToast('Não foi possível excluir o produto.', 'error');
+    } finally {
+      setModalExcluirAberto(false);
+      setProdutoParaExcluir(null);
     }
   };
 
   const alternarStatus = async (produto: Produto) => {
     try {
       await produtosService.atualizar(produto.id, { ativo: !produto.ativo });
+      addToast(`Produto ${produto.ativo ? 'inativado' : 'ativado'}.`, 'success');
       carregarProdutos();
     } catch (error) {
       console.error('Erro ao alterar status:', error);
+      addToast('Erro ao alterar o status do produto.', 'error');
     }
   };
 
@@ -79,19 +112,18 @@ export const Produtos: React.FC = () => {
               setProdutoEdicao(null);
               setModalAberto(true);
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg hover:bg-secondary"
           >
             <Plus size={20} />
             Novo Produto
           </button>
         </div>
 
-        {/* Filtros */}
         <div className="flex gap-4">
           <select
             value={filtroCategoria}
             onChange={(e) => setFiltroCategoria(e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
           >
             <option value="">Todas as categorias</option>
             {categorias.map(categoria => (
@@ -102,7 +134,7 @@ export const Produtos: React.FC = () => {
           <select
             value={filtroAtivo}
             onChange={(e) => setFiltroAtivo(e.target.value as any)}
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
           >
             <option value="todos">Todos os status</option>
             <option value="ativo">Apenas ativos</option>
@@ -111,7 +143,6 @@ export const Produtos: React.FC = () => {
         </div>
       </div>
 
-      {/* Lista de Produtos */}
       <div className="bg-white rounded-lg shadow-md">
         <div className="p-6">
           {produtosFiltrados.length === 0 ? (
@@ -122,28 +153,30 @@ export const Produtos: React.FC = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {produtosFiltrados.map(produto => (
-                <div key={produto.id} className="border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <h3 className="font-bold text-gray-900">{produto.nome}</h3>
-                      <p className="text-sm text-gray-500 mb-1">{produto.categoria}</p>
-                      <p className="text-lg font-bold text-green-600">
-                        R$ {produto.preco.toFixed(2)}
-                      </p>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        produto.ativo
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}>
-                        {produto.ativo ? 'Ativo' : 'Inativo'}
-                      </span>
+                <div key={produto.id} className="border border-gray-200 rounded-lg p-4 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <h3 className="font-bold text-gray-900">{produto.nome}</h3>
+                        <p className="text-sm text-gray-500 mb-1">{produto.categoria}</p>
+                        <p className="text-lg font-bold text-green-600">
+                          R$ {produto.preco.toFixed(2)}
+                        </p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 text-xs rounded-full ${
+                          produto.ativo
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {produto.ativo ? 'Ativo' : 'Inativo'}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   
-                  <div className="flex justify-between items-center">
+                  <div className="flex justify-between items-center mt-2">
                     <button
                       onClick={() => alternarStatus(produto)}
                       className={`px-3 py-1 text-sm rounded-lg ${
@@ -164,7 +197,7 @@ export const Produtos: React.FC = () => {
                       </button>
                       
                       <button
-                        onClick={() => excluirProduto(produto.id)}
+                        onClick={() => handleAbrirModalExcluir(produto)}
                         className="p-2 text-red-600 hover:bg-red-100 rounded-lg"
                       >
                         <Trash2 size={16} />
@@ -178,7 +211,6 @@ export const Produtos: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal */}
       {modalAberto && (
         <ProdutoModal
           produto={produtoEdicao}
@@ -187,6 +219,15 @@ export const Produtos: React.FC = () => {
             setProdutoEdicao(null);
           }}
           onProdutoSalvo={handleProdutoSalvo}
+        />
+      )}
+
+      {modalExcluirAberto && produtoParaExcluir && (
+        <ConfirmacaoModal
+          titulo="Excluir Produto"
+          mensagem={`Tem certeza que deseja excluir o produto "${produtoParaExcluir.nome}"?`}
+          onConfirm={handleConfirmarExclusao}
+          onClose={() => setModalExcluirAberto(false)}
         />
       )}
     </div>

@@ -22,19 +22,26 @@ export const Dashboard: React.FC = () => {
 
   const carregarDados = async () => {
     try {
-      const [comandas, produtos, clientes, faturamentoHoje] = await Promise.all([
+      // ===== CORREÇÃO PRINCIPAL ESTÁ AQUI =====
+      const hoje = new Date();
+      const dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).toISOString();
+      const dataFim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59).toISOString();
+
+      const [comandas, produtos, clientes, relatorioHoje] = await Promise.all([
         comandasService.listarAbertas(),
         produtosService.listar(),
         clientesService.listar(),
-        relatoriosService.obterFaturamentoHoje()
+        // Chamando a função correta para obter o faturamento de hoje
+        relatoriosService.obterVendasPorPeriodo(dataInicio, dataFim)
       ]);
 
       setStats({
         comandasAbertas: comandas.length,
         totalProdutos: produtos.filter(p => p.ativo).length,
         totalClientes: clientes.length,
-        faturamentoDia: faturamentoHoje
+        faturamentoDia: relatorioHoje.total_vendas // Usando o resultado do relatório
       });
+      // =======================================
 
       const comandasOrdenadas = comandas.sort((a, b) => 
         new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime()
@@ -43,6 +50,7 @@ export const Dashboard: React.FC = () => {
 
     } catch (error) {
       console.error('Erro ao carregar dados do dashboard:', error);
+      // Zera os stats em caso de erro
       setStats({
         comandasAbertas: 0,
         totalProdutos: 0,
@@ -89,32 +97,10 @@ export const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatCard
-          title="Comandas Abertas"
-          value={stats.comandasAbertas}
-          icon={Receipt}
-          color="bg-blue-500"
-        />
-        <StatCard
-          title="Produtos Ativos"
-          value={stats.totalProdutos}
-          icon={Package}
-          color="bg-green-500"
-        />
-        <StatCard
-          title="Total Clientes"
-          value={stats.totalClientes}
-          icon={Users}
-          color="bg-purple-500"
-        />
-        <StatCard
-          title="Faturamento Hoje"
-          value={faturamentoVisivel ? `R$ ${stats.faturamentoDia.toFixed(2)}` : 'R$ ****'}
-          icon={TrendingUp}
-          color="bg-primary"
-          isVisibilityToggleable={true}
-          onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}
-        />
+        <StatCard title="Comandas Abertas" value={stats.comandasAbertas} icon={Receipt} color="bg-blue-500"/>
+        <StatCard title="Produtos Ativos" value={stats.totalProdutos} icon={Package} color="bg-green-500"/>
+        <StatCard title="Total Clientes" value={stats.totalClientes} icon={Users} color="bg-purple-500"/>
+        <StatCard title="Faturamento Hoje" value={faturamentoVisivel ? `R$ ${stats.faturamentoDia.toFixed(2)}` : 'R$ ****'} icon={TrendingUp} color="bg-primary" isVisibilityToggleable={true} onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}/>
       </div>
 
       <div className="bg-white rounded-lg shadow-md">
@@ -133,21 +119,13 @@ export const Dashboard: React.FC = () => {
                       {comanda.numero}
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">
-                        {comanda.cliente?.nome || 'Cliente não informado'}
-                      </p>
-                      <p className="text-sm text-gray-500">
-                        Aberta em {new Date(comanda.criado_em).toLocaleString('pt-BR')}
-                      </p>
+                      <p className="font-medium text-gray-900">{comanda.cliente?.nome || 'Cliente não informado'}</p>
+                      <p className="text-sm text-gray-500">Aberta em {new Date(comanda.criado_em).toLocaleString('pt-BR')}</p>
                     </div>
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-gray-500">{comanda.itens?.length || 0} itens</p>
-                    <p className="font-bold text-green-600">
-                      R$ {comanda.itens?.reduce((total, item) => 
-                        total + (item.quantidade * item.valor_unit), 0
-                      ).toFixed(2) || '0.00'}
-                    </p>
+                    <p className="font-bold text-green-600">R$ {comanda.itens?.reduce((total, item) => total + (item.quantidade * item.valor_unit), 0).toFixed(2) || '0.00'}</p>
                   </div>
                 </div>
               ))}

@@ -1,11 +1,9 @@
+// src/components/Auth/LoginForm.tsx
 import React, { useState } from 'react';
-import { signIn } from '../../lib/supabase';
+import { useAuth } from '../../auth/AuthContext'; // Importe o useAuth
 
-interface LoginFormProps {
-  onLoginSuccess: () => void;
-}
-
-export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
+export const LoginForm: React.FC = () => {
+  const { signIn } = useAuth(); // Use o hook
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,14 +15,10 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
     setError('');
 
     try {
-      const { error } = await signIn(email, password);
-      if (error) {
-        setError('Credenciais inválidas. Verifique seu e-mail e senha.');
-      } else {
-        onLoginSuccess();
-      }
-    } catch (err) {
-      setError('Ocorreu um erro ao tentar fazer login.');
+      await signIn(email, password);
+      // O App.tsx irá redirecionar automaticamente após o sucesso
+    } catch (err: any) {
+      setError(err.message || 'Ocorreu um erro ao tentar fazer login.');
     } finally {
       setLoading(false);
     }
@@ -32,10 +26,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
 
   return (
     <div className="min-h-screen bg-secondary flex items-center justify-center p-4">
-      {/* Card branco responsivo */}
       <div className="bg-white rounded-lg shadow-xl p-10 w-full max-w-md md:max-w-lg lg:max-w-xl">
-        
-        {/* Logo centralizada */}
         <div className="text-center mb-6">
           <img 
             src="/nexts.logo1.png" 
@@ -47,10 +38,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label 
-              htmlFor="email" 
-              className="block text-sm font-medium text-gray-700"
-            >
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
               E-mail
             </label>
             <div className="mt-1">
@@ -64,12 +52,8 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
               />
             </div>
           </div>
-
           <div>
-            <label 
-              htmlFor="password" 
-              className="block text-sm font-medium text-gray-700"
-            >
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
               Senha
             </label>
             <div className="mt-1">
@@ -83,13 +67,11 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
               />
             </div>
           </div>
-
           {error && (
             <div className="p-3 bg-red-100 text-red-700 rounded-lg text-sm text-center">
               {error}
             </div>
           )}
-
           <div>
             <button
               type="submit"

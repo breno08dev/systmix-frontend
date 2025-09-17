@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Plus, Minus, Trash2, CreditCard, Banknote, QrCode, Printer } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
 import { comandasService } from '../../services/comandas';
-import { Comanda, Produto } from '../../types';
+import { Comanda, ItemComanda, Produto } from '../../types';
 import { Comprovante } from './Comprovante';
 import { useToast } from '../../contexts/ToastContext';
 
@@ -10,7 +10,6 @@ interface ComandaModalProps {
   comandaInicial: Comanda;
   produtos: Produto[];
   onClose: () => void;
-  // A prop 'onComandaAtualizada' foi removida para evitar o bug
 }
 
 export const ComandaModal: React.FC<ComandaModalProps> = ({
@@ -36,82 +35,90 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
     return comandaAtual.itens?.reduce((total, item) => total + item.quantidade * item.valor_unit, 0) || 0;
   }, [comandaAtual.itens]);
 
-const handlePrint = useReactToPrint({
-    contentRef: comprovanteRef,
-  });
+  const handlePrint = useReactToPrint({ contentRef: comprovanteRef });
 
   const adicionarProduto = async () => {
     if (!produtoSelecionado || carregando) return;
     const produto = produtos.find(p => p.id === produtoSelecionado);
     if (!produto) return;
 
-    const itemExistente = comandaAtual.itens?.find(item => item.id_produto === produto.id);
-    if (itemExistente) {
-      await alterarQuantidade(itemExistente.id, itemExistente.quantidade + 1);
-    } else {
-      setCarregando(true);
-      try {
-        const novoItem = await comandasService.adicionarItem({
-          id_comanda: comandaAtual.id,
-          id_produto: produto.id,
-          quantidade: 1,
-          valor_unit: produto.preco,
-        });
-        // Atualiza o estado local com os dados do banco
-        const comandaDoBanco = await comandasService.buscarPorNumero(comandaAtual.numero);
-        if (comandaDoBanco) setComandaAtual(comandaDoBanco);
-        
-        setProdutoSelecionado('');
-      } catch (error) {
-        console.error('Erro ao adicionar produto:', error);
-        addToast('Erro ao adicionar produto.', 'error');
-      } finally {
-        setCarregando(false);
-      }
+    setCarregando(true);
+    const estadoAnterior = comandaAtual;
+    
+    try {
+      const itemRetornadoDaAPI = await comandasService.adicionarItem(comandaAtual.id, {
+        id_produto: produto.id,
+        quantidade: 1,
+        valor_unit: produto.preco,
+      });
+
+      setComandaAtual(prev => {
+        const itemExistente = prev.itens?.find(i => i.id === itemRetornadoDaAPI.id);
+        if (itemExistente) {
+            return {
+                ...prev,
+                itens: prev.itens?.map(i => i.id === itemRetornadoDaAPI.id ? itemRetornadoDaAPI : i)
+            }
+        } else {
+            return {
+                ...prev,
+                itens: [...(prev.itens || []), itemRetornadoDaAPI]
+            }
+        }
+      });
+      
+      setProdutoSelecionado('');
+    } catch (error) {
+      console.error('Erro ao adicionar produto:', error);
+      addToast('Erro ao adicionar produto.', 'error');
+      setComandaAtual(estadoAnterior);
+    } finally {
+      setCarregando(false);
     }
   };
 
-  const alterarQuantidade = async (itemId: string, novaQuantidade: number) => {
-    if (novaQuantidade < 1) return removerItem(itemId);
+ const alterarQuantidade = async (itemId: string, novaQuantidade: number) => {
+    if (novaQuantidade < 1) {
+      return removerItem(itemId);
+    }
 
-    let comandaOriginal: Comanda | null = null;
-
-    setComandaAtual(currentState => {
-      comandaOriginal = currentState;
-      const novosItens = currentState.itens?.map(item =>
-        item.id === itemId ? { ...item, quantidade: novaQuantidade } : item
-      );
-      return { ...currentState, itens: novosItens };
-    });
+    const estadoAnterior = comandaAtual;
+    // Atualização Otimista: muda a UI primeiro, assumindo que vai funcionar.
+    setComandaAtual(prev => ({
+        ...prev,
+        itens: prev.itens?.map(i => i.id === itemId ? { ...i, quantidade: novaQuantidade } : i)
+    }));
 
     try {
-      await comandasService.atualizarQuantidadeItem(itemId, novaQuantidade);
+      // Apenas executa a chamada à API. Não esperamos um valor de retorno.
+      await comandasService.atualizarQuantidadeItem(comandaAtual.id, itemId, novaQuantidade);
+      // Se a chamada for bem-sucedida, a nossa atualização otimista estava correta. Não precisamos de fazer mais nada.
     } catch (error) {
       console.error('Erro ao alterar quantidade:', error);
-      addToast('Erro ao atualizar. Desfazendo alteração.', 'error');
-      if (comandaOriginal) setComandaAtual(comandaOriginal);
+      addToast('Erro ao atualizar quantidade.', 'error');
+      // Se a API der erro, revertemos o estado para a versão anterior.
+      setComandaAtual(estadoAnterior);
     }
   };
 
   const removerItem = async (itemId: string) => {
-    let comandaOriginal: Comanda | null = null;
-
-    setComandaAtual(currentState => {
-      comandaOriginal = currentState;
-      const novosItens = currentState.itens?.filter(item => item.id !== itemId);
-      return { ...currentState, itens: novosItens };
-    });
-
+    const estadoAnterior = comandaAtual;
+    setComandaAtual(prev => ({
+        ...prev,
+        itens: prev.itens?.filter(i => i.id !== itemId)
+    }));
+    
     try {
-      await comandasService.removerItem(itemId);
+      await comandasService.removerItem(comandaAtual.id, itemId);
     } catch (error) {
       console.error('Erro ao remover item:', error);
-      addToast('Erro ao remover. Desfazendo alteração.', 'error');
-      if (comandaOriginal) setComandaAtual(comandaOriginal);
+      addToast('Erro ao remover item.', 'error');
+      setComandaAtual(estadoAnterior);
     }
   };
   
   const fecharComanda = async () => {
+    // ... (código sem alterações)
     if (totalComanda <= 0) {
       addToast('Não é possível fechar uma comanda sem itens.', 'error');
       return;
@@ -124,12 +131,11 @@ const handlePrint = useReactToPrint({
     setCarregando(true);
     try {
       await comandasService.fecharComanda(comandaAtual.id, [{
-        id_comanda: comandaAtual.id,
         metodo: metodoPagamento,
         valor: totalComanda,
       }]);
       addToast('Comanda fechada com sucesso!', 'success');
-      onClose(); // Apenas fecha o modal. O PDV vai recarregar a lista.
+      onClose();
     } catch (error) {
       console.error('Erro ao fechar comanda:', error);
       addToast('Não foi possível fechar a comanda.', 'error');
@@ -148,13 +154,14 @@ const handlePrint = useReactToPrint({
   }, [mostrarPagamento, totalComanda, valorPagamento]);
 
   return (
+    // O JSX (a parte visual) do componente continua exatamente o mesmo
     <>
       <div style={{ display: 'none' }}>
         <Comprovante ref={comprovanteRef} comanda={comandaAtual} />
       </div>
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
-          {/* O restante do JSX do modal permanece o mesmo */}
+          {/* O JSX aqui não precisa de alterações */}
           <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Comanda {comandaAtual.numero}</h2>

@@ -9,7 +9,7 @@ export const Relatorios: React.FC = () => {
   const [relatorio, setRelatorio] = useState<RelatorioVendas | null>(null);
   const [carregando, setCarregando] = useState(false);
 
-  // Função para formatar a data sem problemas de timezone
+  // Função para formatar a data que será usada tanto na tela quanto no nome do arquivo PDF
   const formatarData = (dataString: string) => {
     const [ano, mes, dia] = dataString.split('-');
     return `${dia}/${mes}/${ano}`;
@@ -37,12 +37,40 @@ export const Relatorios: React.FC = () => {
       alert("Gere um relatório primeiro antes de exportar.");
       return;
     }
+    
     try {
-      await relatoriosService.exportarVendasPDF(
-        relatorio,
-        `${dataInicio}T00:00:00`,
-        `${dataFim}T23:59:59`
-      );
+      // Chama a nova rota da API de PDF
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/relatorios/pdf`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            // Pega o token do localStorage para autenticação
+            'Authorization': `Bearer ${localStorage.getItem('@SystMix:token')}` 
+        },
+        body: JSON.stringify({
+            relatorio,
+            dataInicio: `${dataInicio}T00:00:00`,
+            dataFim: `${dataFim}T23:59:59`,
+        })
+      });
+
+      if (!response.ok) {
+          throw new Error('Falha ao gerar o PDF no servidor.');
+      }
+
+      // Converte a resposta num blob (ficheiro em memória)
+      const blob = await response.blob();
+
+      // Cria uma URL temporária para o ficheiro e simula um clique para fazer o download
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `relatorio_vendas_${formatarData(dataInicio)}_a_${formatarData(dataFim)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove(); // Limpa o elemento 'a' da página
+      window.URL.revokeObjectURL(url); // Libera a memória
+
     } catch (error) {
       console.error('Erro ao exportar PDF:', error);
       alert('Ocorreu um erro ao gerar o PDF.');
@@ -111,7 +139,6 @@ export const Relatorios: React.FC = () => {
               <div>
                 <h3 className="font-medium text-gray-700 mb-2">Desempenho</h3>
                 <ul className="space-y-2 text-sm text-gray-600">
-                  {/* CORREÇÃO DA DATA */}
                   <li>• Período: {formatarData(dataInicio)} a {formatarData(dataFim)}</li>
                   <li>• Total arrecadado: R$ {relatorio.total_vendas.toFixed(2)}</li>
                   <li>• Comandas fechadas: {relatorio.total_comandas}</li>
@@ -122,14 +149,13 @@ export const Relatorios: React.FC = () => {
                 <h3 className="font-medium text-gray-700 mb-2">Destaques</h3>
                 <ul className="space-y-2 text-sm text-gray-600">
                   <li>• Item mais vendido: {relatorio.item_mais_vendido}</li>
-                  <li>• Média de itens por comanda: {relatorio.media_itens_comanda.toFixed(2)}</li>
+                  {/* A média de itens por comanda não está no objeto de relatório da API, então removemos por enquanto */}
                   <li>• Status geral: {relatorio.total_vendas > 0 ? 'Positivo' : 'Sem vendas'}</li>
                 </ul>
               </div>
             </div>
           </div>
           
-          {/* NOVO CARD DE PAGAMENTOS */}
           {relatorio.pagamentos_por_metodo.length > 0 && (
             <div className="bg-white rounded-lg shadow-md p-6">
               <div className="flex items-center gap-3 mb-4">

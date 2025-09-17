@@ -1,72 +1,53 @@
-import { supabase } from '../lib/supabase';
 import { Produto } from '../types';
+import { apiFetch } from '../lib/api'; // Supondo que você criou o apiFetch em src/lib/api.ts
 
 export const produtosService = {
+  /**
+   * Lista todos os produtos (ativos e inativos) a partir da API.
+   */
   async listar(): Promise<Produto[]> {
-    const { data, error } = await supabase
-      .from('produtos')
-      .select('*')
-      .order('nome');
-    
-    if (error) throw error;
-    return data || [];
+    return apiFetch('/products');
   },
 
+  /**
+   * Busca todos os produtos e filtra apenas os ativos no lado do cliente.
+   * Isso evita a necessidade de um endpoint de API separado.
+   */
   async listarAtivos(): Promise<Produto[]> {
-    const { data, error } = await supabase
-      .from('produtos')
-      .select('*')
-      .eq('ativo', true)
-      .order('categoria, nome');
-    
-    if (error) throw error;
-    return data || [];
+    const todosProdutos = await this.listar();
+    return todosProdutos.filter(p => p.ativo);
   },
 
-  // NOVA FUNÇÃO para verificar se o produto está em uso
-  async verificarUsoProduto(id: string): Promise<boolean> {
-    const { count, error } = await supabase
-      .from('itens_comanda')
-      .select('*', { count: 'exact', head: true })
-      .eq('id_produto', id);
-
-    if (error) {
-      console.error('Erro ao verificar uso do produto:', error);
-      throw error;
-    }
-
-    return (count || 0) > 0;
-  },
-
+  /**
+   * Envia uma requisição para criar um novo produto.
+   * @param produto Os dados do produto a ser criado.
+   */
   async criar(produto: Omit<Produto, 'id' | 'criado_em'>): Promise<Produto> {
-    const { data, error } = await supabase
-      .from('produtos')
-      .insert(produto)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+    return apiFetch('/products', {
+      method: 'POST',
+      body: JSON.stringify(produto),
+    });
   },
 
+  /**
+   * Envia uma requisição para atualizar um produto existente.
+   * @param id O ID do produto a ser atualizado.
+   * @param produto Os novos dados parciais do produto.
+   */
   async atualizar(id: string, produto: Partial<Produto>): Promise<Produto> {
-    const { data, error } = await supabase
-      .from('produtos')
-      .update(produto)
-      .eq('id', id)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+    return apiFetch(`/products/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(produto),
+    });
   },
 
+  /**
+   * Envia uma requisição para deletar um produto.
+   * @param id O ID do produto a ser deletado.
+   */
   async deletar(id: string): Promise<void> {
-    const { error } = await supabase
-      .from('produtos')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
-  }
+    await apiFetch(`/products/${id}`, {
+      method: 'DELETE',
+    });
+  },
 };

@@ -1,66 +1,45 @@
-import { supabase } from '../lib/supabase';
 import { Cliente } from '../types';
+import { apiFetch } from '../lib/api'; // Certifique-se de que o caminho para api.ts está correto
 
 export const clientesService = {
+  /**
+   * Lista todos os clientes a partir da API.
+   */
   async listar(): Promise<Cliente[]> {
-    const { data, error } = await supabase
-      .from('clientes')
-      .select('*')
-      .order('nome');
-    
-    if (error) throw error;
-    return data || [];
+    return apiFetch('/clientes');
   },
 
-  async buscarPorTelefone(telefone: string): Promise<Cliente | null> {
-    const { data, error } = await supabase
-      .from('clientes')
-      .select('*')
-      .eq('telefone', telefone)
-      .single();
-    
-    if (error && error.code !== 'PGRST116') throw error;
-    return data || null;
-  },
-
+  /**
+   * Envia uma requisição para criar um novo cliente.
+   * @param cliente Os dados do cliente a ser criado.
+   */
   async criar(cliente: Omit<Cliente, 'id' | 'criado_em'>): Promise<Cliente> {
-    const { data, error } = await supabase
-      .from('clientes')
-      .insert(cliente)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+    return apiFetch('/clientes', {
+      method: 'POST',
+      body: JSON.stringify(cliente),
+    });
   },
 
+  /**
+   * Envia uma requisição para atualizar um cliente existente.
+   * @param id O ID do cliente a ser atualizado.
+   * @param cliente Os novos dados parciais do cliente.
+   */
   async atualizar(id: string, cliente: Partial<Cliente>): Promise<Cliente> {
-    const { data, error } = await supabase
-      .from('clientes')
-      .update(cliente)
-      .eq('id', id)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+    return apiFetch(`/clientes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(cliente),
+    });
   },
 
-  // NOVA FUNÇÃO
+  /**
+   * Envia uma requisição para deletar um cliente.
+   * A API irá tratar o erro caso o cliente esteja vinculado a uma comanda.
+   * @param id O ID do cliente a ser deletado.
+   */
   async deletar(id: string): Promise<void> {
-    const { error } = await supabase
-      .from('clientes')
-      .delete()
-      .eq('id', id);
-    
-    if (error) {
-      // Adiciona um log de erro mais detalhado
-      console.error("Erro no Supabase ao deletar cliente:", error.message);
-      // Informa ao usuário sobre o problema de chave estrangeira
-      if (error.code === '23503') { // Código de erro para violação de chave estrangeira no PostgreSQL
-        throw new Error('Não é possível excluir este cliente, pois ele está associado a uma ou mais comandas.');
-      }
-      throw error;
-    }
-  }
+    await apiFetch(`/clientes/${id}`, {
+      method: 'DELETE',
+    });
+  },
 };

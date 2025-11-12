@@ -1,45 +1,86 @@
+// src/services/clientes.ts
 import { Cliente } from '../types';
-import { apiFetch } from '../lib/api'; // Certifique-se de que o caminho para api.ts está correto
+import { supabase } from '../lib/supabaseClient';
+
+function lancarErroSupabase(error: any) {
+  console.error('Erro no Supabase:', error);
+  const mensagemErro = error.details || error.message || 'Ocorreu um erro na operação com o banco de dados.';
+  throw new Error(mensagemErro);
+}
+
+/**
+ * Helper para converter a resposta do Supabase (com 'null')
+ * para o tipo 'Cliente' do front-end (com 'undefined').
+ */
+function mapSupabaseClienteToCliente(data: any): Cliente {
+  return {
+    ...data,
+    // O tipo 'Cliente' espera 'telefone?: string' (undefined)
+    // O Supabase retorna 'telefone: string | null'
+    telefone: data.telefone || undefined,
+    // Mesmo caso para 'criado_em'
+    criado_em: data.criado_em || new Date().toISOString(),
+  };
+}
+
 
 export const clientesService = {
-  /**
-   * Lista todos os clientes a partir da API.
-   */
   async listar(): Promise<Cliente[]> {
-    return apiFetch('/clientes');
+    const { data, error } = await supabase
+      .from('clientes')
+      .select('*')
+      .order('nome', { ascending: true });
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    
+    return data?.map(mapSupabaseClienteToCliente) || []; // CORREÇÃO: Mapeia a lista
   },
 
-  /**
-   * Envia uma requisição para criar um novo cliente.
-   * @param cliente Os dados do cliente a ser criado.
-   */
   async criar(cliente: Omit<Cliente, 'id' | 'criado_em'>): Promise<Cliente> {
-    return apiFetch('/clientes', {
-      method: 'POST',
-      body: JSON.stringify(cliente),
-    });
+    const { data, error } = await supabase
+      .from('clientes')
+      .insert(cliente)
+      .select()
+      .single();
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    if (!data) {
+      throw new Error('Não foi possível criar o cliente.');
+    }
+    
+    return mapSupabaseClienteToCliente(data); // CORREÇÃO: Mapeia o objeto
   },
 
-  /**
-   * Envia uma requisição para atualizar um cliente existente.
-   * @param id O ID do cliente a ser atualizado.
-   * @param cliente Os novos dados parciais do cliente.
-   */
   async atualizar(id: string, cliente: Partial<Cliente>): Promise<Cliente> {
-    return apiFetch(`/clientes/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(cliente),
-    });
+    const { data, error } = await supabase
+      .from('clientes')
+      .update(cliente)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    if (!data) {
+      throw new Error('Não foi possível atualizar o cliente.');
+    }
+    
+    return mapSupabaseClienteToCliente(data); // CORREÇÃO: Mapeia o objeto
   },
 
-  /**
-   * Envia uma requisição para deletar um cliente.
-   * A API irá tratar o erro caso o cliente esteja vinculado a uma comanda.
-   * @param id O ID do cliente a ser deletado.
-   */
   async deletar(id: string): Promise<void> {
-    await apiFetch(`/clientes/${id}`, {
-      method: 'DELETE',
-    });
+    const { error } = await supabase
+      .from('clientes')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
   },
 };

@@ -30,7 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <div className="w-64 bg-primary text-white h-screen flex flex-col">
       <div className="p-6 border-b border-secondary">
-        <h1 className="text-2xl font-bold text-white">NextSys</h1>
+        <h1 className="text-2xl font-bold text-white">ComanDay</h1>
       </div>
       
       <nav className="flex-1 p-4">

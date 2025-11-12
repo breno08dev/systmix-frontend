@@ -1,53 +1,109 @@
+// src/services/produtos.ts
 import { Produto } from '../types';
-import { apiFetch } from '../lib/api'; // Supondo que você criou o apiFetch em src/lib/api.ts
+import { supabase } from '../lib/supabaseClient';
+
+function lancarErroSupabase(error: any) {
+  console.error('Erro no Supabase:', error);
+  throw new Error(error.message || 'Ocorreu um erro na operação com o banco de dados.');
+}
+
+/**
+ * Helper para converter a resposta do Supabase (com 'null')
+ * para o tipo 'Produto' do front-end (com 'undefined').
+ */
+function mapSupabaseProdutoToProduto(data: any): Produto {
+  return {
+    ...data,
+    // O tipo 'Produto' espera 'criado_em: string'
+    // O Supabase (baseado no SQL) retorna 'criado_em: string | null'
+    criado_em: data.criado_em || new Date().toISOString(), // Garante que não seja nulo
+  };
+}
 
 export const produtosService = {
-  /**
-   * Lista todos os produtos (ativos e inativos) a partir da API.
-   */
   async listar(): Promise<Produto[]> {
-    return apiFetch('/products');
+    const { data, error } = await supabase
+      .from('produtos')
+      .select('*')
+      .order('nome', { ascending: true });
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    
+    return data?.map(mapSupabaseProdutoToProduto) || []; // CORREÇÃO: Mapeia a lista
   },
 
-  /**
-   * Busca todos os produtos e filtra apenas os ativos no lado do cliente.
-   * Isso evita a necessidade de um endpoint de API separado.
-   */
   async listarAtivos(): Promise<Produto[]> {
-    const todosProdutos = await this.listar();
-    return todosProdutos.filter(p => p.ativo);
+    const { data, error } = await supabase
+      .from('produtos')
+      .select('*')
+      .eq('ativo', true)
+      .order('nome', { ascending: true });
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    
+    return data?.map(mapSupabaseProdutoToProduto) || []; // CORREÇÃO: Mapeia a lista
   },
 
-  /**
-   * Envia uma requisição para criar um novo produto.
-   * @param produto Os dados do produto a ser criado.
-   */
   async criar(produto: Omit<Produto, 'id' | 'criado_em'>): Promise<Produto> {
-    return apiFetch('/products', {
-      method: 'POST',
-      body: JSON.stringify(produto),
-    });
+    const { data, error } = await supabase
+      .from('produtos')
+      .insert(produto)
+      .select()
+      .single();
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    if (!data) {
+      throw new Error('Não foi possível criar o produto.');
+    }
+
+    return mapSupabaseProdutoToProduto(data); // CORREÇÃO: Mapeia o objeto
   },
 
-  /**
-   * Envia uma requisição para atualizar um produto existente.
-   * @param id O ID do produto a ser atualizado.
-   * @param produto Os novos dados parciais do produto.
-   */
   async atualizar(id: string, produto: Partial<Produto>): Promise<Produto> {
-    return apiFetch(`/products/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(produto),
-    });
+    const { data, error } = await supabase
+      .from('produtos')
+      .update(produto)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    if (!data) {
+      throw new Error('Não foi possível atualizar o produto.');
+    }
+
+    return mapSupabaseProdutoToProduto(data); // CORREÇÃO: Mapeia o objeto
   },
 
-  /**
-   * Envia uma requisição para deletar um produto.
-   * @param id O ID do produto a ser deletado.
-   */
   async deletar(id: string): Promise<void> {
-    await apiFetch(`/products/${id}`, {
-      method: 'DELETE',
-    });
+    const { error } = await supabase
+      .from('produtos')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+  },
+
+  async verificarUsoProduto(id: string): Promise<boolean> {
+    const { error, count } = await supabase
+      .from('itens_comanda')
+      .select('id', { count: 'exact', head: true })
+      .eq('id_produto', id);
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+
+    return (count || 0) > 0;
   },
 };

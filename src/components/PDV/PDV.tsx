@@ -1,3 +1,4 @@
+// src/components/PDV/PDV.tsx (VERSÃO FINAL CORRIGIDA)
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart } from 'lucide-react';
 import { comandasService } from '../../services/comandas';
@@ -6,23 +7,24 @@ import { clientesService } from '../../services/clientes';
 import { Comanda, Produto, Cliente } from '../../types';
 import { ComandaModal } from './ComandaModal';
 import { AbrirComandaModal } from './AbrirComandaModal';
+import { useToast } from '../../contexts/ToastContext';
 
 export const PDV: React.FC = () => {
   const [comandasAbertas, setComandasAbertas] = useState<Comanda[]>([]);
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [atualizando, setAtualizando] = useState(false);
+  const [carregando, setCarregando] = useState(true);
   
   const [comandaSelecionada, setComandaSelecionada] = useState<Comanda | null>(null);
   const [numeroParaAbrir, setNumeroParaAbrir] = useState<number | null>(null);
+  const { addToast } = useToast();
 
   useEffect(() => {
     carregarDados();
   }, []);
 
   const carregarDados = async () => {
-    if (atualizando) return;
-    setAtualizando(true);
+    setCarregando(true);
     try {
       const [comandasData, produtosData, clientesData] = await Promise.all([
         comandasService.listarAbertas(),
@@ -32,10 +34,11 @@ export const PDV: React.FC = () => {
       setComandasAbertas(comandasData);
       setProdutos(produtosData);
       setClientes(clientesData);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao recarregar dados:', error);
+      addToast(error.message || 'Erro ao carregar dados do PDV', 'error');
     } finally {
-      setAtualizando(false);
+      setCarregando(false);
     }
   };
 
@@ -50,24 +53,22 @@ export const PDV: React.FC = () => {
 
   const handleConfirmarAbertura = async (numero: number, idCliente?: string) => {
     try {
+      // A API já retorna a comanda completa, vamos usá-la diretamente
       const novaComanda = await comandasService.criarComanda(numero, idCliente);
+      addToast(`Comanda ${numero} aberta com sucesso!`, 'success');
       setNumeroParaAbrir(null);
-      await carregarDados();
-      
-      const comandaRecemCriada = await comandasService.buscarPorNumero(novaComanda.numero);
-      if (comandaRecemCriada) {
-        setComandaSelecionada(comandaRecemCriada);
-      }
-    } catch (error) {
+      // Atualiza a lista de comandas abertas e já seleciona a nova para edição
+      setComandasAbertas(prev => [...prev, novaComanda]);
+      setComandaSelecionada(novaComanda);
+    } catch (error: any) {
       console.error('Erro ao confirmar abertura da comanda:', error);
-      alert('Erro ao abrir comanda. Tente novamente.');
+      addToast(error.message || 'Erro ao abrir comanda.', 'error');
     }
   };
 
-  // AGORA SÓ RECARREGA OS DADOS QUANDO O MODAL É FECHADO
   const handleFecharModal = () => {
     setComandaSelecionada(null);
-    carregarDados();
+    carregarDados(); // Recarrega todos os dados para garantir consistência
   };
 
   const calcularTotalComanda = (comanda: Comanda) => {
@@ -86,12 +87,13 @@ export const PDV: React.FC = () => {
       <div className="bg-white rounded-lg shadow-md mb-8">
         <div className="p-6 border-b border-gray-200 flex items-center justify-between">
           <h2 className="text-xl font-bold text-gray-900">Comandas Abertas</h2>
-          {/* CÓDIGO CORRIGIDO PARA O CONTADOR */}
           <div className="text-sm text-gray-500">{comandasAbertas.length} comandas ativas</div>
         </div>
         
         <div className="p-6">
-          {comandasAbertas.length === 0 ? (
+          {carregando ? (
+            <p className="text-gray-500 text-center py-8">Carregando...</p>
+          ) : comandasAbertas.length === 0 ? (
             <p className="text-gray-500 text-center py-8">Nenhuma comanda aberta</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

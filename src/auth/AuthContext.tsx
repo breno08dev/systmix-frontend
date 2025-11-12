@@ -1,15 +1,11 @@
+// src/auth/AuthContext.tsx
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-
-interface User {
-  id: string;
-  email?: string;
-}
+import { supabase } from '../lib/supabaseClient'; // Importamos nosso cliente Supabase
+import { Session, User } from '@supabase/supabase-js'; // Importamos os tipos do Supabase
 
 interface AuthContextData {
   user: User | null;
-  token: string | null;
+  session: Session | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
   loading: boolean;
@@ -19,54 +15,62 @@ const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Tenta carregar a sessão do localStorage ao iniciar a aplicação
-    const storedToken = localStorage.getItem('@SystMix:token');
-    const storedUser = localStorage.getItem('@SystMix:user');
+    // 1. Tenta pegar a sessão que já existe (carregamento inicial)
+    const getSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
+      setUser(session?.user ?? null);
+      setLoading(false);
+    };
 
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser));
-    }
-    setLoading(false);
+    getSession();
+
+    // 2. Ouve por mudanças no estado de autenticação (login, logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+    });
+
+    // 3. Limpa a inscrição ao desmontar o componente
+    return () => {
+      subscription?.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const response = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+    // Usamos o método signInWithPassword do Supabase
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
     });
 
-    if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Credenciais inválidas');
+    if (error) {
+      throw new Error(error.message || 'Credenciais inválidas');
     }
-
-    const { user, session } = await response.json();
-
-    setUser(user);
-    setToken(session.access_token);
-
-    // Armazena no localStorage para persistir a sessão
-    localStorage.setItem('@SystMix:user', JSON.stringify(user));
-    localStorage.setItem('@SystMix:token', session.access_token);
+    // O 'onAuthStateChange' listener vai cuidar de atualizar o estado
   };
 
-  const signOut = () => {
-    setUser(null);
-    setToken(null);
-    // Limpa o localStorage
-    localStorage.removeItem('@SystMix:user');
-    localStorage.removeItem('@SystMix:token');
+  const signOut = async () => {
+    // Usamos o método signOut do Supabase
+    await supabase.auth.signOut();
+    // O 'onAuthStateChange' listener vai cuidar de atualizar o estado
+  };
+
+  const value = {
+    user,
+    session,
+    signIn,
+    signOut,
+    loading
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, signIn, signOut, loading }}>
-      {children}
+    <AuthContext.Provider value={value}>
+      {!loading && children}
     </AuthContext.Provider>
   );
 };

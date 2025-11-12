@@ -1,3 +1,4 @@
+// src/components/Dashboard/Dashboard.tsx (VERSÃO FINAL COM AJUSTE)
 import React, { useState, useEffect } from 'react';
 import { Receipt, Package, Users, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { comandasService } from '../../services/comandas';
@@ -14,7 +15,9 @@ export const Dashboard: React.FC = () => {
     faturamentoDia: 0
   });
   const [comandasRecentes, setComandasRecentes] = useState<Comanda[]>([]);
-  const [faturamentoVisivel, setFaturamentoVisivel] = useState(true);
+  // ===== ESTA É A ÚNICA LINHA ALTERADA (de 'true' para 'false') =====
+  const [faturamentoVisivel, setFaturamentoVisivel] = useState(false);
+  // =================================================================
 
   useEffect(() => {
     carregarDados();
@@ -22,7 +25,6 @@ export const Dashboard: React.FC = () => {
 
   const carregarDados = async () => {
     try {
-      // ===== CORREÇÃO PRINCIPAL ESTÁ AQUI =====
       const hoje = new Date();
       const dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).toISOString();
       const dataFim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59).toISOString();
@@ -31,7 +33,6 @@ export const Dashboard: React.FC = () => {
         comandasService.listarAbertas(),
         produtosService.listar(),
         clientesService.listar(),
-        // Chamando a função correta para obter o faturamento de hoje
         relatoriosService.obterVendasPorPeriodo(dataInicio, dataFim)
       ]);
 
@@ -39,9 +40,8 @@ export const Dashboard: React.FC = () => {
         comandasAbertas: comandas.length,
         totalProdutos: produtos.filter(p => p.ativo).length,
         totalClientes: clientes.length,
-        faturamentoDia: relatorioHoje.total_vendas // Usando o resultado do relatório
+        faturamentoDia: relatorioHoje.total_vendas
       });
-      // =======================================
 
       const comandasOrdenadas = comandas.sort((a, b) => 
         new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime()
@@ -50,7 +50,6 @@ export const Dashboard: React.FC = () => {
 
     } catch (error) {
       console.error('Erro ao carregar dados do dashboard:', error);
-      // Zera os stats em caso de erro
       setStats({
         comandasAbertas: 0,
         totalProdutos: 0,
@@ -100,7 +99,7 @@ export const Dashboard: React.FC = () => {
         <StatCard title="Comandas Abertas" value={stats.comandasAbertas} icon={Receipt} color="bg-blue-500"/>
         <StatCard title="Produtos Ativos" value={stats.totalProdutos} icon={Package} color="bg-green-500"/>
         <StatCard title="Total Clientes" value={stats.totalClientes} icon={Users} color="bg-purple-500"/>
-        <StatCard title="Faturamento Hoje" value={faturamentoVisivel ? `R$ ${stats.faturamentoDia.toFixed(2)}` : 'R$ ****'} icon={TrendingUp} color="bg-primary" isVisibilityToggleable={true} onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}/>
+        <StatCard title="Faturamento Hoje" value={faturamentoVisivel ? `R$ ${(stats.faturamentoDia || 0).toFixed(2)}` : 'R$ ****'} icon={TrendingUp} color="bg-primary" isVisibilityToggleable={true} onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}/>
       </div>
 
       <div className="bg-white rounded-lg shadow-md">
@@ -125,7 +124,7 @@ export const Dashboard: React.FC = () => {
                   </div>
                   <div className="text-right">
                     <p className="text-sm text-gray-500">{comanda.itens?.length || 0} itens</p>
-                    <p className="font-bold text-green-600">R$ {comanda.itens?.reduce((total, item) => total + (item.quantidade * item.valor_unit), 0).toFixed(2) || '0.00'}</p>
+                    <p className="font-bold text-green-600">R$ {(comanda.itens?.reduce((total, item) => total + (item.quantidade * item.valor_unit), 0) || 0).toFixed(2)}</p>
                   </div>
                 </div>
               ))}

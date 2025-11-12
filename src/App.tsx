@@ -1,5 +1,5 @@
-// src/App.tsx
-import React from 'react';
+
+import { useState } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Sidebar } from './components/Layout/Sidebar';
 import { Dashboard } from './components/Dashboard/Dashboard';
@@ -10,9 +10,11 @@ import { Relatorios } from './components/Relatorios/Relatorios';
 import { LoginForm } from './components/Auth/LoginForm';
 import { ToastProvider } from './contexts/ToastContext';
 
+// Componente interno que renderiza o conteúdo principal da aplicação
 function AppContent() {
   const { user, signOut, loading } = useAuth();
-  const [activeSection, setActiveSection] = React.useState('dashboard');
+  // Corrigido para usar 'useState' diretamente, que é uma prática mais comum
+  const [activeSection, setActiveSection] = useState('dashboard');
 
   const renderContent = () => {
     switch (activeSection) {
@@ -25,6 +27,7 @@ function AppContent() {
     }
   };
 
+  // Tela de carregamento enquanto a sessão é verificada
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
@@ -56,8 +59,11 @@ function AppContent() {
   );
 }
 
+// Componente principal que organiza os Provedores de Contexto
 function App() {
   return (
+    // O ToastProvider deve envolver o AuthProvider para que as notificações
+    // estejam disponíveis em toda a aplicação, incluindo na lógica de login.
     <ToastProvider>
       <AuthProvider>
         <AppContent />

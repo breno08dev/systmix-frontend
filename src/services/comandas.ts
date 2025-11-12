@@ -1,71 +1,167 @@
+// src/services/comandas.ts
 import { Comanda, ItemComanda, Pagamento } from '../types';
-import { apiFetch } from '../lib/api'; // Importa a nossa função de fetch centralizada
+import { supabase } from '../lib/supabaseClient';
+
+function lancarErroSupabase(error: any) {
+  console.error('Erro no Supabase:', error);
+  const mensagemErro = error.details || error.message || 'Ocorreu um erro na operação com o banco de dados.';
+  throw new Error(mensagemErro);
+}
+
+/**
+ * CORREÇÃO: Mapeia a resposta da tabela 'comandas' (com nulos)
+ * para o tipo 'Comanda' do front-end (com undefined).
+ */
+function mapSupabaseComandaToComanda(data: any): Comanda {
+  return {
+    ...data,
+    id_cliente: data.id_cliente || undefined,
+    fechado_em: data.fechado_em || undefined,
+    cliente: data.cliente || undefined,
+    itens: data.itens?.map(mapSupabaseItemToItemComanda) || [], // Usa o helper de item
+    pagamentos: data.pagamentos || []
+  };
+}
+
+/**
+ * CORREÇÃO: Mapeia a resposta da tabela 'itens_comanda' (com nulos)
+ * para o tipo 'ItemComanda' do front-end.
+ */
+function mapSupabaseItemToItemComanda(data: any): ItemComanda {
+  return {
+    ...data,
+    produto: data.produto || undefined
+  };
+}
 
 export const comandasService = {
-  /**
-   * Busca todas as comandas com status 'aberta' na API.
-   */
   async listarAbertas(): Promise<Comanda[]> {
-    return apiFetch('/comandas');
+    const { data, error } = await supabase
+      .from('comandas')
+      .select(`
+        *,
+        cliente:clientes(*),
+        itens:itens_comanda(*, produto:produtos(*))
+      `)
+      .eq('status', 'aberta')
+      .order('numero', { ascending: true });
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    
+    return data?.map(mapSupabaseComandaToComanda) || []; // CORREÇÃO: Usa o helper
   },
 
-  /**
-   * Envia uma requisição para criar uma nova comanda.
-   * @param numero O número da comanda.
-   * @param idCliente O ID opcional do cliente.
-   */
+  async buscarPorNumero(numero: number): Promise<Comanda | null> {
+    const { data, error } = await supabase
+      .from('comandas')
+      .select(`
+        *,
+        cliente:clientes(*),
+        itens:itens_comanda(*, produto:produtos(*))
+      `)
+      .eq('status', 'aberta')
+      .eq('numero', numero)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null;
+      lancarErroSupabase(error);
+    }
+    
+    if (!data) {
+      return null;
+    }
+
+    return mapSupabaseComandaToComanda(data); // CORREÇÃO: Usa o helper
+  },
+
   async criarComanda(numero: number, idCliente?: string): Promise<Comanda> {
-    return apiFetch('/comandas', {
-      method: 'POST',
-      body: JSON.stringify({ numero, id_cliente: idCliente }),
-    });
+    const { data, error } = await supabase
+      .from('comandas')
+      .insert({
+        numero: numero,
+        id_cliente: idCliente
+      })
+      .select()
+      .single();
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    if (!data) {
+      throw new Error('Não foi possível criar a comanda.');
+    }
+
+    return mapSupabaseComandaToComanda(data); // CORREÇÃO: Usa o helper
   },
 
-  /**
-   * Adiciona um item a uma comanda específica.
-   * @param idComanda O ID da comanda.
-   * @param item O objeto do item a ser adicionado.
-   */
   async adicionarItem(idComanda: string, item: Omit<ItemComanda, 'id' | 'id_comanda' | 'criado_em'>): Promise<ItemComanda> {
-    return apiFetch(`/comandas/${idComanda}/itens`, {
-        method: 'POST',
-        body: JSON.stringify(item),
+    const { data: rpcData, error: rpcError } = await supabase.rpc('adicionar_item_comanda', {
+      p_id_comanda: idComanda,
+      p_id_produto: item.id_produto,
+      p_valor_unit: item.valor_unit
     });
+
+    if (rpcError) {
+      lancarErroSupabase(rpcError);
+    }
+    if (!rpcData) {
+      throw new Error('A função adicionar_item_comanda não retornou dados.');
+    }
+
+    const { data: itemCompleto, error: itemError } = await supabase
+      .from('itens_comanda')
+      .select('*, produto:produtos(*)')
+      .eq('id', rpcData.id)
+      .single();
+    
+    if (itemError) {
+      lancarErroSupabase(itemError);
+    }
+    if (!itemCompleto) {
+      throw new Error('Não foi possível encontrar o item recém-criado.');
+    }
+    
+    return mapSupabaseItemToItemComanda(itemCompleto); // CORREÇÃO: Usa o helper
   },
 
-  /**
-   * Atualiza a quantidade de um item específico em uma comanda.
-   * @param idComanda O ID da comanda.
-   * @param idItem O ID do item.
-   * @param quantidade A nova quantidade.
-   */
+  // As funções abaixo (atualizar/remover/fechar) não retornam 'data',
+  // então não precisam de mapeamento.
+  
   async atualizarQuantidadeItem(idComanda: string, idItem: string, quantidade: number): Promise<void> {
-    await apiFetch(`/comandas/${idComanda}/itens/${idItem}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ quantidade }),
-    });
+    const { error } = await supabase
+      .from('itens_comanda')
+      .update({ quantidade: quantidade })
+      .eq('id', idItem)
+      .eq('id_comanda', idComanda);
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
   },
 
-  /**
-   * Remove um item de uma comanda.
-   * @param idComanda O ID da comanda.
-   * @param idItem O ID do item a ser removido.
-   */
   async removerItem(idComanda: string, idItem: string): Promise<void> {
-    await apiFetch(`/comandas/${idComanda}/itens/${idItem}`, {
-        method: 'DELETE',
-    });
+    const { error } = await supabase
+      .from('itens_comanda')
+      .delete()
+      .eq('id', idItem)
+      .eq('id_comanda', idComanda);
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
   },
 
-  /**
-   * Fecha uma comanda, registrando os pagamentos.
-   * @param idComanda O ID da comanda a ser fechada.
-   * @param pagamentos Um array com os pagamentos realizados.
-   */
   async fecharComanda(idComanda: string, pagamentos: Omit<Pagamento, 'id' | 'data' | 'id_comanda'>[]): Promise<void> {
-    await apiFetch(`/comandas/${idComanda}/fechar`, {
-        method: 'POST',
-        body: JSON.stringify({ pagamentos }),
+    const { error } = await supabase.rpc('fechar_comanda_com_pagamentos', {
+      p_id_comanda: idComanda,
+      p_pagamentos: pagamentos
     });
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
   },
 };

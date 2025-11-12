@@ -1,3 +1,4 @@
+// src/contexts/ToastContext.tsx (VERSÃO CORRIGIDA)
 import React, { createContext, useState, useContext, ReactNode } from 'react';
 import { Toast } from '../components/Common/Toast';
 
@@ -19,7 +20,8 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const addToast = (message: string, type: ToastType) => {
-    const id = Date.now();
+    // Usamos Math.random() para garantir um ID único
+    const id = Math.random(); 
     setToasts(prevToasts => [...prevToasts, { id, message, type }]);
   };
 

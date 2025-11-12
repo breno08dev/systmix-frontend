@@ -1,3 +1,4 @@
+// src/types/index.ts (VERSÃO FINAL E CORRIGIDA)
 export interface Produto {
   id: string;
   nome: string;
@@ -49,7 +50,6 @@ export interface RelatorioVendas {
   total_comandas: number;
   item_mais_vendido: string;
   ticket_medio: number;
-  media_itens_comanda: number;
-  // NOVO CAMPO ADICIONADO
+  // A propriedade 'media_itens_comanda' foi removida para sincronizar com a API
   pagamentos_por_metodo: { metodo: string; total: number }[];
 }

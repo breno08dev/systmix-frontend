@@ -1,28 +1,39 @@
+// src/services/relatorios.ts
 import { RelatorioVendas } from '../types';
-import { apiFetch } from '../lib/api'; // Importa a nossa função de fetch centralizada
+import { supabase } from '../lib/supabaseClient';
+
+function lancarErroSupabase(error: any) {
+  console.error('Erro no Supabase:', error);
+  const mensagemErro = error.details || error.message || 'Ocorreu um erro na operação com o banco de dados.';
+  throw new Error(mensagemErro);
+}
+
+
+function mapSupabaseRelatorioToRelatorio(data: any): RelatorioVendas {
+  return {
+    total_vendas: data.total_vendas || 0,
+    total_comandas: data.total_comandas || 0,
+    item_mais_vendido: data.item_mais_vendido || 'Nenhum',
+    ticket_medio: data.ticket_medio || 0,
+    pagamentos_por_metodo: data.pagamentos_por_metodo || []
+  };
+}
 
 export const relatoriosService = {
-  /**
-   * Busca os dados de vendas consolidados da API para um período específico.
-   * @param dataInicio A data e hora de início do período.
-   * @param dataFim A data e hora de fim do período.
-   */
   async obterVendasPorPeriodo(dataInicio: string, dataFim: string): Promise<RelatorioVendas> {
-    // Constrói a URL com os parâmetros de busca para a requisição GET
-    const params = new URLSearchParams({ dataInicio, dataFim });
     
-    return apiFetch(`/relatorios?${params.toString()}`);
+    const { data, error } = await supabase.rpc('obter_vendas_por_periodo', {
+      p_data_inicio: dataInicio,
+      p_data_fim: dataFim
+    });
+
+    if (error) {
+      lancarErroSupabase(error);
+    }
+    if (!data) {
+      throw new Error('Não foi possível gerar o relatório.');
+    }
+
+    return mapSupabaseRelatorioToRelatorio(data);
   },
-
-  /**
-   * A função para obter o faturamento de hoje foi removida pois a nova implementação
-   * da API de relatórios já cobre essa funcionalidade ao passar a data do dia.
-   * O Dashboard no front-end fará essa chamada com as datas apropriadas.
-   */
-
-  /**
-   * A função para exportar PDF foi removida do front-end.
-   * Esta é agora uma responsabilidade que pode ser implementada
-   * diretamente no back-end.
-   */
 };

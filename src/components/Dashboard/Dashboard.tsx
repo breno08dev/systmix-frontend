@@ -1,4 +1,4 @@
-// src/components/Dashboard/Dashboard.tsx (VERSÃO FINAL COM AJUSTE)
+// src/components/Dashboard/Dashboard.tsx (CORRIGIDO PARA O CAIXA)
 import React, { useState, useEffect } from 'react';
 import { Receipt, Package, Users, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import { comandasService } from '../../services/comandas';
@@ -6,6 +6,10 @@ import { produtosService } from '../../services/produtos';
 import { clientesService } from '../../services/clientes';
 import { relatoriosService } from '../../services/relatorios'; 
 import { Comanda } from '../../types';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { useSync } from '../../contexts/SyncContext';
+import { useToast } from '../../contexts/ToastContext';
+import { useCaixa } from '../../contexts/CaixaContext'; // NOVO: Importar o hook do caixa
 
 export const Dashboard: React.FC = () => {
   const [stats, setStats] = useState({
@@ -15,32 +19,47 @@ export const Dashboard: React.FC = () => {
     faturamentoDia: 0
   });
   const [comandasRecentes, setComandasRecentes] = useState<Comanda[]>([]);
-  // ===== ESTA É A ÚNICA LINHA ALTERADA (de 'true' para 'false') =====
   const [faturamentoVisivel, setFaturamentoVisivel] = useState(false);
-  // =================================================================
+  
+  const { isOnline } = useOnlineStatus();
+  const { isSyncing } = useSync();
+  const { addToast } = useToast();
+  // NOVO: Consumir o contexto do caixa
+  const { caixaAberto, caixaSession } = useCaixa(); 
 
+  // Recarrega os dados quando o status online/sync mudar
   useEffect(() => {
     carregarDados();
-  }, []);
+  // O dashboard precisa recarregar sempre que a sessão do caixa for alterada
+  }, [isOnline, isSyncing, caixaAberto]); 
 
   const carregarDados = async () => {
+    if (!caixaAberto || !caixaSession) {
+      // Não carrega dados de venda se o caixa não estiver aberto
+      setStats({ comandasAbertas: 0, totalProdutos: 0, totalClientes: 0, faturamentoDia: 0 });
+      setComandasRecentes([]);
+      return; 
+    }
+
     try {
-      const hoje = new Date();
-      const dataInicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate()).toISOString();
-      const dataFim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59).toISOString();
+      // === CORREÇÃO DA LÓGICA DE TEMPO: Usa a data de abertura do caixa ===
+      const dataInicio = caixaSession.data_abertura;
+      const dataFim = new Date().toISOString(); // Vai até o momento atual
 
       const [comandas, produtos, clientes, relatorioHoje] = await Promise.all([
-        comandasService.listarAbertas(),
-        produtosService.listar(),
-        clientesService.listar(),
-        relatoriosService.obterVendasPorPeriodo(dataInicio, dataFim)
+        comandasService.listarAbertas(isOnline),
+        produtosService.listar(isOnline),
+        clientesService.listar(isOnline),
+        isOnline ? relatoriosService.obterVendasPorPeriodo(dataInicio, dataFim) : Promise.resolve(null)
       ]);
+      
+      // ... (restante da lógica de setStats)
 
       setStats({
         comandasAbertas: comandas.length,
         totalProdutos: produtos.filter(p => p.ativo).length,
         totalClientes: clientes.length,
-        faturamentoDia: relatorioHoje.total_vendas
+        faturamentoDia: relatorioHoje?.total_vendas || 0
       });
 
       const comandasOrdenadas = comandas.sort((a, b) => 
@@ -48,15 +67,10 @@ export const Dashboard: React.FC = () => {
       );
       setComandasRecentes(comandasOrdenadas.slice(0, 5));
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao carregar dados do dashboard:', error);
-      setStats({
-        comandasAbertas: 0,
-        totalProdutos: 0,
-        totalClientes: 0,
-        faturamentoDia: 0
-      });
-      setComandasRecentes([]);
+      addToast(error.message || 'Erro ao carregar dashboard', 'error');
+      // ... (reset stats)
     }
   };
 
@@ -95,13 +109,26 @@ export const Dashboard: React.FC = () => {
         <p className="text-gray-600">Visão geral do seu bar</p>
       </div>
 
+      {!caixaAberto && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-6 text-center font-medium">
+          O caixa está fechado. Abra o caixa para começar a registrar vendas!
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatCard title="Comandas Abertas" value={stats.comandasAbertas} icon={Receipt} color="bg-blue-500"/>
         <StatCard title="Produtos Ativos" value={stats.totalProdutos} icon={Package} color="bg-green-500"/>
         <StatCard title="Total Clientes" value={stats.totalClientes} icon={Users} color="bg-purple-500"/>
-        <StatCard title="Faturamento Hoje" value={faturamentoVisivel ? `R$ ${(stats.faturamentoDia || 0).toFixed(2)}` : 'R$ ****'} icon={TrendingUp} color="bg-primary" isVisibilityToggleable={true} onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}/>
+        <StatCard 
+          title={`Faturamento (${caixaAberto ? 'Caixa Aberto' : 'Caixa Fechado'})`} 
+          value={faturamentoVisivel ? `R$ ${(stats.faturamentoDia || 0).toFixed(2)}` : 'R$ ****'} 
+          icon={TrendingUp} 
+          color="bg-primary" 
+          isVisibilityToggleable={isOnline && caixaAberto} // Só pode ver se estiver online E caixa aberto
+          onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}
+        />
       </div>
-
+      {/* ... (Resto do JSX) */}
       <div className="bg-white rounded-lg shadow-md">
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">Últimas Comandas Abertas</h2>

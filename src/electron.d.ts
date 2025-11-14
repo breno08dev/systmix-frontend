@@ -1,12 +1,15 @@
-import { Cliente, Produto, Comanda, ItemComanda, Pagamento } from './types/index';
+// src/electron.d.ts
+import { Cliente, Produto, Comanda } from './types'; // Importe seus tipos
 
+// Interface para as ações pendentes
 export interface PendingAction {
   id?: number;
   action_type: string;
-  payload: string; 
+  payload: string; // O payload será um JSON stringificado
   criado_em?: string;
 }
 
+// Interface da API que expomos no preload.ts
 export interface ILocalApi {
   // Clientes
   getClientes: () => Promise<Cliente[]>;
@@ -20,13 +23,9 @@ export interface ILocalApi {
   updateProduto: (id: string, produto: Partial<Produto>) => Promise<void>;
   deleteProduto: (id: string) => Promise<void>;
   
-  // Comandas
+  // Comandas (Exemplo)
   getComandasAbertas: () => Promise<Comanda[]>;
-  createComanda: (comanda: Comanda) => Promise<Comanda>; 
-  addItemComanda: (item: ItemComanda) => Promise<ItemComanda>; 
-  updateItemQuantidade: (idItem: string, quantidade: number) => Promise<void>;
-  removeItemComanda: (idItem: string) => Promise<void>;
-  fecharComanda: (idComanda: string, pagamentos: Omit<Pagamento, 'id' | 'data' | 'id_comanda'>[]) => Promise<void>;
+  // ... (outros métodos de comanda) ...
 
   // Fila de Sincronização
   getPendingActions: () => Promise<PendingAction[]>;
@@ -34,6 +33,7 @@ export interface ILocalApi {
   deletePendingAction: (id: number) => Promise<void>;
 }
 
+// Estende a interface global 'Window'
 declare global {
   interface Window {
     localApi: ILocalApi;

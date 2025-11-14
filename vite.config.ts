@@ -10,15 +10,22 @@ export default defineConfig({
     react(),
     electron([
       {
-        // Arquivo principal do Electron (Main Process)
         entry: 'electron/main.ts',
       },
       {
-        // Script de Preload
         entry: 'electron/preload.ts',
         onstart(options) {
-          // Garante que o script de preload seja recarregado
           options.reload();
+        },
+        // CORREÇÃO: Força o script de preload a ser compilado como CommonJS
+        vite: {
+          build: {
+            rollupOptions: {
+              output: {
+                format: 'cjs',
+              },
+            },
+          },
         },
       },
     ]),

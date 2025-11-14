@@ -1,9 +1,10 @@
-// src/components/Relatorios/Relatorios.tsx (VERSÃO FINAL COM EXPORTAR PDF)
+// src/components/Relatorios/Relatorios.tsx (VERSÃO CORRIGIDA PARA PDF)
 import React, { useState } from 'react';
 import { Calendar, Download, TrendingUp, Receipt, Star, DollarSign, Wallet } from 'lucide-react';
 import { relatoriosService } from '../../services/relatorios';
 import { RelatorioVendas } from '../../types';
 import { useToast } from '../../contexts/ToastContext';
+import { supabase } from '../../lib/supabaseClient'; // <--- 1. IMPORTAR O SUPABASE
 
 export const Relatorios: React.FC = () => {
   const [dataInicio, setDataInicio] = useState(new Date().toISOString().split('T')[0]);
@@ -46,11 +47,19 @@ export const Relatorios: React.FC = () => {
     }
     
     try {
+      // --- 2. BUSCAR O TOKEN CORRETO DA SESSÃO ---
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("Usuário não autenticado.");
+      }
+      const token = session.access_token;
+      // ------------------------------------------
+
       const response = await fetch(`${import.meta.env.VITE_API_URL}/relatorios/pdf`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('@SystMix:token')}` 
+            'Authorization': `Bearer ${token}` // <--- 3. USAR O TOKEN CORRETO
         },
         body: JSON.stringify({
             relatorio,

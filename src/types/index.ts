@@ -53,3 +53,12 @@ export interface RelatorioVendas {
   // A propriedade 'media_itens_comanda' foi removida para sincronizar com a API
   pagamentos_por_metodo: { metodo: string; total: number }[];
 }
+
+// === NOVO TIPO PARA O CAIXA ===
+export interface Caixa {
+  id: string;
+  data_abertura: string;
+  valor_inicial: number;
+  data_fechamento?: string;
+  valor_final?: number;
+}

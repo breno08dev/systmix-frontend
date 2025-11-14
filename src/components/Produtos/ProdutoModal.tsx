@@ -2,17 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
 import { Produto } from '../../types';
+import { useToast } from '../../contexts/ToastContext'; 
+// 1. NÃO PRECISAMOS MAIS DO 'useSync' AQUI
+// import { useSync } from '../../contexts/SyncContext'; 
 
 interface ProdutoModalProps {
   produto: Produto | null;
   onClose: () => void;
   onProdutoSalvo: () => void;
+  isOnline: boolean; // 2. O modal RECEBE 'isOnline'
 }
 
 export const ProdutoModal: React.FC<ProdutoModalProps> = ({
   produto,
   onClose,
-  onProdutoSalvo
+  onProdutoSalvo,
+  isOnline // 3. A prop é recebida aqui
 }) => {
   const [formData, setFormData] = useState({
     nome: '',
@@ -20,6 +25,12 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
     preco: '',
     ativo: true
   });
+  
+  const { addToast } = useToast(); 
+  const [carregando, setCarregando] = useState(false);
+  
+  // 4. REMOVIDO: Não precisamos mais do 'addPendingAction'
+  // const { addPendingAction } = useSync(); 
 
   const categoriasSugeridas = [
     'Bebidas',
@@ -47,6 +58,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCarregando(true);
     
     try {
       const produtoData = {
@@ -56,15 +68,22 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
         ativo: formData.ativo
       };
 
+      // 5. CORREÇÃO: Usamos 'isOnline' como primeiro argumento.
+      // O serviço decide se salva online ou offline.
       if (produto) {
-        await produtosService.atualizar(produto.id, produtoData);
+        await produtosService.atualizar(isOnline, produto.id, produtoData);
       } else {
-        await produtosService.criar(produtoData);
+        await produtosService.criar(isOnline, produtoData);
       }
 
+      addToast(`Produto salvo ${isOnline ? 'com sucesso' : 'localmente'}!`, 'success');
       onProdutoSalvo();
-    } catch (error) {
+      
+    } catch (error: any) {
       console.error('Erro ao salvar produto:', error);
+      addToast(error.message || 'Não foi possível salvar o produto.', 'error');
+    } finally {
+      setCarregando(false);
     }
   };
 
@@ -85,6 +104,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
           <button
             onClick={onClose}
             className="p-2 hover:bg-gray-100 rounded-lg"
+            disabled={carregando}
           >
             <X size={20} />
           </button>
@@ -101,6 +121,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               onChange={(e) => handleChange('nome', e.target.value)}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
               required
+              disabled={carregando}
             />
           </div>
 
@@ -115,6 +136,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               onChange={(e) => handleChange('categoria', e.target.value)}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
               required
+              disabled={carregando}
             />
             <datalist id="categorias">
               {categoriasSugeridas.map(categoria => (
@@ -135,6 +157,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               onChange={(e) => handleChange('preco', e.target.value)}
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
               required
+              disabled={carregando}
             />
           </div>
 
@@ -145,6 +168,7 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               checked={formData.ativo}
               onChange={(e) => handleChange('ativo', e.target.checked)}
               className="rounded border-gray-300 focus:ring-secondary"
+              disabled={carregando}
             />
             <label htmlFor="ativo" className="text-sm font-medium text-gray-700">
               Produto ativo
@@ -156,14 +180,16 @@ export const ProdutoModal: React.FC<ProdutoModalProps> = ({
               type="button"
               onClick={onClose}
               className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              disabled={carregando}
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-secondary"
+              className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-secondary disabled:bg-gray-400"
+              disabled={carregando}
             >
-              {produto ? 'Salvar' : 'Criar'}
+              {carregando ? 'Salvando...' : (produto ? 'Salvar' : 'Criar')}
             </button>
           </div>
         </form>

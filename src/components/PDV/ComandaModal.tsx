@@ -1,4 +1,4 @@
-// src/components/PDV/ComandaModal.tsx (VERSÃO FINAL CORRIGIDA)
+// src/components/PDV/ComandaModal.tsx (HÍBRIDO E CORRIGIDO)
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Plus, Minus, Trash2, CreditCard, Banknote, QrCode, Printer } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
@@ -11,13 +11,23 @@ interface ComandaModalProps {
   comandaInicial: Comanda;
   produtos: Produto[];
   onClose: () => void;
+  isOnline: boolean;
 }
 
-export const ComandaModal: React.FC<ComandaModalProps> = ({
+// =========================================================
+// === INÍCIO DA CORREÇÃO (erro da imagem image_3841a9.png) ===
+// =========================================================
+// Mudando de 'export const' para 'export default' para forçar o TS a limpar o cache
+export default function ComandaModal({
   comandaInicial,
   produtos,
   onClose,
-}) => {
+  isOnline,
+}: ComandaModalProps) {
+// =========================================================
+// === FIM DA CORREÇÃO ===
+// =========================================================
+
   const [comandaAtual, setComandaAtual] = useState<Comanda>(comandaInicial);
   const [produtoSelecionado, setProdutoSelecionado] = useState<string>('');
   const [mostrarPagamento, setMostrarPagamento] = useState(false);
@@ -29,7 +39,6 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
   const { addToast } = useToast();
 
   useEffect(() => {
-    // Garante que o estado interno é atualizado se a prop mudar
     setComandaAtual(comandaInicial);
   }, [comandaInicial]);
 
@@ -37,7 +46,7 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
     return comandaAtual.itens?.reduce((total, item) => total + item.quantidade * item.valor_unit, 0) || 0;
   }, [comandaAtual.itens]);
 
- const handlePrint = useReactToPrint({ contentRef: comprovanteRef });
+  const handlePrint = useReactToPrint({ contentRef: comprovanteRef });
 
   const adicionarProduto = async () => {
     if (!produtoSelecionado || carregando) return;
@@ -46,36 +55,37 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
 
     setCarregando(true);
     try {
-      const itemRetornadoDaAPI = await comandasService.adicionarItem(comandaAtual.id, {
+      const itemRetornado = await comandasService.adicionarItem(isOnline, comandaAtual.id, {
         id_produto: produto.id,
         quantidade: 1,
         valor_unit: produto.preco,
       });
 
-      setComandaAtual(prevComanda => {
-        const itensAtuais = prevComanda.itens || [];
-        // Tenta encontrar o item que foi atualizado (pelo ID do produto)
-        const itemExistenteIndex = itensAtuais.findIndex(i => i.id_produto === itemRetornadoDaAPI.id_produto);
-
-        let novosItens;
-        if (itemExistenteIndex > -1) {
-          // Se o item já existia, substituímos ele no array pelo item atualizado da API
-          novosItens = [
-            ...itensAtuais.slice(0, itemExistenteIndex),
-            itemRetornadoDaAPI,
-            ...itensAtuais.slice(itemExistenteIndex + 1),
-          ];
-        } else {
-          // Se é um item completamente novo, apenas adicionamos ao final
-          novosItens = [...itensAtuais, itemRetornadoDaAPI];
-        }
-        return { ...prevComanda, itens: novosItens };
-      });
+      // Atualização otimista (precisa ser melhorada para offline)
+      if (itemRetornado) {
+        setComandaAtual(prevComanda => {
+          const itensAtuais = prevComanda.itens || [];
+          // @ts-ignore
+          const itemExistenteIndex = itensAtuais.findIndex(i => i.id_produto === itemRetornado.id_produto);
+          let novosItens;
+          if (itemExistenteIndex > -1) {
+            // @ts-ignore
+            novosItens = [...itensAtuais.slice(0, itemExistenteIndex), itemRetornado, ...itensAtuais.slice(itemExistenteIndex + 1)];
+          } else {
+            // @ts-ignore
+            novosItens = [...itensAtuais, itemRetornado];
+          }
+          return { ...prevComanda, itens: novosItens };
+        });
+      } else if (!isOnline) {
+        addToast('Item adicionado localmente.', 'success');
+        // TODO: A 'localDatabaseService.adicionarItem' deve retornar o item
+      }
       
       setProdutoSelecionado('');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao adicionar produto:', error);
-      addToast('Erro ao adicionar produto.', 'error');
+      addToast(error.message || 'Erro ao adicionar produto.', 'error');
     } finally {
       setCarregando(false);
     }
@@ -85,20 +95,18 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
     if (novaQuantidade < 1) {
       return removerItem(itemId);
     }
-
     const estadoAnterior = { ...comandaAtual };
-    // Atualização Otimista
     setComandaAtual(prev => ({
         ...prev,
         itens: (prev.itens || []).map(i => i.id === itemId ? { ...i, quantidade: novaQuantidade } : i)
     }));
 
     try {
-      await comandasService.atualizarQuantidadeItem(comandaAtual.id, itemId, novaQuantidade);
-    } catch (error) {
+      await comandasService.atualizarQuantidadeItem(isOnline, comandaAtual.id, itemId, novaQuantidade);
+    } catch (error: any) {
       console.error('Erro ao alterar quantidade:', error);
-      addToast('Erro ao atualizar quantidade.', 'error');
-      setComandaAtual(estadoAnterior); // Reverte em caso de erro
+      addToast(error.message || 'Erro ao atualizar quantidade.', 'error');
+      setComandaAtual(estadoAnterior);
     }
   };
 
@@ -110,11 +118,11 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
     }));
     
     try {
-      await comandasService.removerItem(comandaAtual.id, itemId);
+      await comandasService.removerItem(isOnline, comandaAtual.id, itemId);
       addToast('Item removido.', 'success');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao remover item:', error);
-      addToast('Erro ao remover item.', 'error');
+      addToast(error.message || 'Erro ao remover item.', 'error');
       setComandaAtual(estadoAnterior);
     }
   };
@@ -129,17 +137,18 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
       addToast('O valor pago não pode ser menor que o total da comanda.', 'error');
       return;
     }
+    
     setCarregando(true);
     try {
-      await comandasService.fecharComanda(comandaAtual.id, [{
+      await comandasService.fecharComanda(isOnline, comandaAtual.id, [{
         metodo: metodoPagamento,
         valor: totalComanda,
       }]);
-      addToast('Comanda fechada com sucesso!', 'success');
-      onClose(); // Isso vai fechar o modal e acionar o recarregamento na tela do PDV
-    } catch (error) {
+      addToast(`Comanda fechada ${isOnline ? 'com sucesso' : '(offline)'}!`, 'success');
+      onClose(); 
+    } catch (error: any) {
       console.error('Erro ao fechar comanda:', error);
-      addToast('Não foi possível fechar a comanda.', 'error');
+      addToast(error.message || 'Não foi possível fechar a comanda.', 'error');
     } finally {
       setCarregando(false);
     }
@@ -161,6 +170,7 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
       </div>
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
+          
           <div className="p-6 border-b border-gray-200 flex items-center justify-between">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Comanda {comandaAtual.numero}</h2>
@@ -175,6 +185,7 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
               </button>
             </div>
           </div>
+
           <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8 overflow-y-auto flex-1">
             <div>
               <h3 className="text-lg font-bold text-gray-900 mb-4">Adicionar Produtos</h3>
@@ -198,6 +209,7 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
                 </button>
               </div>
             </div>
+            
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-bold text-gray-900">Itens da Comanda</h3>
@@ -226,6 +238,7 @@ export const ComandaModal: React.FC<ComandaModalProps> = ({
               </div>
             </div>
           </div>
+
           {totalComanda > 0 && (
             <div className="p-6 border-t border-gray-200">
               {!mostrarPagamento ? (

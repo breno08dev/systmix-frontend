@@ -1,0 +1,16 @@
+directories:
+  output: release
+  buildResources: build
+appId: com.systmix.app
+productName: SystMix
+files:
+  - filter:
+      - dist/**/*
+      - dist-electron/**/*
+win:
+  target: nsis
+mac:
+  target: dmg
+linux:
+  target: AppImage
+electronVersion: 31.7.7

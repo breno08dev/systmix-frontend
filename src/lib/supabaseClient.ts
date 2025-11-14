@@ -11,5 +11,5 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Cria e exporta o cliente Supabase
-// Usaremos <Database> para ter a tipagem do seu banco (próximo passo)
+// Usaremos <Database> para ter a tipagem do banco (próximo passo)
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);

@@ -5,8 +5,17 @@ import { Produto } from '../../types';
 import { ProdutoModal } from './ProdutoModal';
 import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
 import { useToast } from '../../contexts/ToastContext';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { useSync } from '../../contexts/SyncContext';
 
-export const Produtos: React.FC = () => {
+// =========================================================
+// === INÍCIO DA CORREÇÃO (Voltando ao original) ===
+// =========================================================
+export const Produtos: React.FC = () => { // MUDANÇA: Voltando para 'export const Produtos: React.FC'
+// =========================================================
+// === FIM DA CORREÇÃO ===
+// =========================================================
+
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [modalAberto, setModalAberto] = useState(false);
   const [produtoEdicao, setProdutoEdicao] = useState<Produto | null>(null);
@@ -17,18 +26,24 @@ export const Produtos: React.FC = () => {
   const [produtoParaExcluir, setProdutoParaExcluir] = useState<Produto | null>(null);
 
   const { addToast } = useToast();
+  const { isSyncing } = useSync();
+  const { isOnline } = useOnlineStatus();
 
   useEffect(() => {
     carregarProdutos();
-  }, []);
+  }, []); 
+
+  useEffect(() => {
+    carregarProdutos();
+  }, [isOnline, isSyncing]);
 
   const carregarProdutos = async () => {
     try {
-      const data = await produtosService.listar();
+      const data = await produtosService.listar(isOnline); 
       setProdutos(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao carregar produtos:', error);
-      addToast('Erro ao carregar produtos.', 'error');
+      addToast(error.message || 'Erro ao carregar produtos.', 'error');
     }
   };
 
@@ -36,7 +51,6 @@ export const Produtos: React.FC = () => {
     carregarProdutos();
     setModalAberto(false);
     setProdutoEdicao(null);
-    addToast('Produto salvo com sucesso!', 'success');
   };
 
   const editarProduto = (produto: Produto) => {
@@ -53,10 +67,9 @@ export const Produtos: React.FC = () => {
     if (!produtoParaExcluir) return;
 
     try {
-      const emUso = await produtosService.verificarUsoProduto(produtoParaExcluir.id);
+      const emUso = await produtosService.verificarUsoProduto(isOnline, produtoParaExcluir.id);
 
       if (emUso) {
-        // MENSAGEM DE ERRO ATUALIZADA PARA SER MAIS CLARA
         addToast(
           'Produto não pode ser excluído pois já faz parte de comandas. Use a opção "Inativar".',
           'error'
@@ -65,12 +78,13 @@ export const Produtos: React.FC = () => {
         return;
       }
 
-      await produtosService.deletar(produtoParaExcluir.id);
-      addToast('Produto excluído com sucesso!', 'success');
-      carregarProdutos();
-    } catch (error) {
+      await produtosService.deletar(isOnline, produtoParaExcluir.id);
+      addToast(`Produto excluído ${isOnline ? '' : 'localmente.'}`, 'success');
+      carregarProdutos(); 
+
+    } catch (error: any) {
       console.error('Erro ao excluir produto:', error);
-      addToast('Não foi possível excluir o produto.', 'error');
+      addToast(error.message || 'Não foi possível excluir o produto.', 'error');
     } finally {
       setModalExcluirAberto(false);
       setProdutoParaExcluir(null);
@@ -79,12 +93,12 @@ export const Produtos: React.FC = () => {
 
   const alternarStatus = async (produto: Produto) => {
     try {
-      await produtosService.atualizar(produto.id, { ativo: !produto.ativo });
-      addToast(`Produto ${produto.ativo ? 'inativado' : 'ativado'}.`, 'success');
+      await produtosService.atualizar(isOnline, produto.id, { ativo: !produto.ativo });
+      addToast(`Produto ${produto.ativo ? 'inativado' : 'ativado'} ${isOnline ? '' : 'localmente.'}`, 'success');
       carregarProdutos();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao alterar status:', error);
-      addToast('Erro ao alterar o status do produto.', 'error');
+      addToast(error.message || 'Erro ao alterar o status do produto.', 'error');
     }
   };
 
@@ -219,6 +233,7 @@ export const Produtos: React.FC = () => {
             setProdutoEdicao(null);
           }}
           onProdutoSalvo={handleProdutoSalvo}
+          isOnline={isOnline}
         />
       )}
 

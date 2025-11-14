@@ -14,6 +14,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* === ESTA É A NOVA LINHA === */
+    "types": ["vite/client"],
+    /* ============================ */
+
     /* Linting */
     "strict": true,
     "noUnusedLocals": true,

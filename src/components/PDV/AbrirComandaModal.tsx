@@ -1,13 +1,17 @@
+// src/components/PDV/AbrirComandaModal.tsx (CORRIGIDO)
 import React, { useState } from 'react';
 import { X, UserPlus, Search } from 'lucide-react';
 import { Cliente } from '../../types';
 import { clientesService } from '../../services/clientes';
+import { useToast } from '../../contexts/ToastContext'; 
 
 interface AbrirComandaModalProps {
   numeroComanda: number;
   clientes: Cliente[];
   onClose: () => void;
-  onComandaAberta: (numero: number, idCliente?: string) => void;
+  // MUDANÇA: Agora passa o objeto Cliente completo (opcional)
+  onComandaAberta: (numero: number, idCliente?: string, clientObject?: Cliente) => void;
+  isOnline: boolean; 
 }
 
 export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
@@ -15,12 +19,14 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
   clientes,
   onClose,
   onComandaAberta,
+  isOnline 
 }) => {
   const [buscaCliente, setBuscaCliente] = useState('');
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null);
   const [novoClienteNome, setNovoClienteNome] = useState('');
   const [novoClienteTelefone, setNovoClienteTelefone] = useState('');
   const [modoNovoCliente, setModoNovoCliente] = useState(false);
+  const { addToast } = useToast(); 
 
   const clientesFiltrados = clientes.filter(c => 
     c.nome.toLowerCase().includes(buscaCliente.toLowerCase()) ||
@@ -28,26 +34,35 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
   );
 
   const handleAbrirComanda = async () => {
+    let clienteParaPassar: Cliente | undefined = clienteSelecionado || undefined;
+
     if (modoNovoCliente) {
       if (!novoClienteNome) {
-        alert('O nome do novo cliente é obrigatório.');
+        addToast('O nome do novo cliente é obrigatório.', 'error');
         return;
       }
       try {
-        const novoCliente = await clientesService.criar({
+        const novoCliente = await clientesService.criar(isOnline, {
           nome: novoClienteNome,
           telefone: novoClienteTelefone || undefined,
         });
-        onComandaAberta(numeroComanda, novoCliente.id);
-      } catch (error) {
-        console.error("Erro ao criar novo cliente:", error);
-        alert("Não foi possível criar o novo cliente.");
-      }
-    } else {
-      onComandaAberta(numeroComanda, clienteSelecionado?.id);
-    }
-  };
+        
+        // Se a criação foi bem-sucedida, usamos o objeto retornado
+        clienteParaPassar = novoCliente as Cliente; 
 
+      } catch (error: any) {
+        console.error("Erro ao criar novo cliente:", error);
+        addToast(error.message || "Não foi possível criar o novo cliente.", 'error');
+        return; // Sai da função em caso de erro
+      }
+    }
+    
+    // Passa o ID do cliente e o objeto completo para o PDV
+    onComandaAberta(numeroComanda, clienteParaPassar?.id, clienteParaPassar);
+  };
+  
+  // ... (JSX restante)
+  
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg p-6 w-full max-w-lg">

@@ -1,13 +1,15 @@
-// src/components/PDV/PDV.tsx (VERSÃO FINAL CORRIGIDA)
+// src/components/PDV/PDV.tsx (CORREÇÃO DO FLICKER)
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart } from 'lucide-react';
 import { comandasService } from '../../services/comandas';
 import { produtosService } from '../../services/produtos';
 import { clientesService } from '../../services/clientes';
 import { Comanda, Produto, Cliente } from '../../types';
-import { ComandaModal } from './ComandaModal';
+import ComandaModal from './ComandaModal'; 
 import { AbrirComandaModal } from './AbrirComandaModal';
 import { useToast } from '../../contexts/ToastContext';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { useSync } from '../../contexts/SyncContext';
 
 export const PDV: React.FC = () => {
   const [comandasAbertas, setComandasAbertas] = useState<Comanda[]>([]);
@@ -17,25 +19,29 @@ export const PDV: React.FC = () => {
   
   const [comandaSelecionada, setComandaSelecionada] = useState<Comanda | null>(null);
   const [numeroParaAbrir, setNumeroParaAbrir] = useState<number | null>(null);
+  
   const { addToast } = useToast();
+  const { isOnline } = useOnlineStatus();
+  const { isSyncing } = useSync();
 
   useEffect(() => {
     carregarDados();
-  }, []);
+  }, [isOnline, isSyncing]); 
 
   const carregarDados = async () => {
     setCarregando(true);
+    // addToast removido anteriormente para evitar repetição
     try {
       const [comandasData, produtosData, clientesData] = await Promise.all([
-        comandasService.listarAbertas(),
-        produtosService.listarAtivos(),
-        clientesService.listar()
+        comandasService.listarAbertas(isOnline),
+        produtosService.listarAtivos(isOnline),
+        clientesService.listar(isOnline)
       ]);
       setComandasAbertas(comandasData);
       setProdutos(produtosData);
       setClientes(clientesData);
     } catch (error: any) {
-      console.error('Erro ao recarregar dados:', error);
+      console.error('Erro ao carregar dados:', error);
       addToast(error.message || 'Erro ao carregar dados do PDV', 'error');
     } finally {
       setCarregando(false);
@@ -51,15 +57,20 @@ export const PDV: React.FC = () => {
     }
   };
 
-  const handleConfirmarAbertura = async (numero: number, idCliente?: string) => {
+  const handleConfirmarAbertura = async (numero: number, idCliente?: string, clientObject?: Cliente) => {
     try {
-      // A API já retorna a comanda completa, vamos usá-la diretamente
-      const novaComanda = await comandasService.criarComanda(numero, idCliente);
-      addToast(`Comanda ${numero} aberta com sucesso!`, 'success');
+      const novaComanda = await comandasService.criarComanda(isOnline, numero, idCliente);
+      addToast(`Comanda ${numero} aberta!`, 'success');
       setNumeroParaAbrir(null);
-      // Atualiza a lista de comandas abertas e já seleciona a nova para edição
-      setComandasAbertas(prev => [...prev, novaComanda]);
-      setComandaSelecionada(novaComanda);
+      
+      if (novaComanda) {
+        const comandaComCliente = { ...novaComanda, cliente: clientObject };
+        // @ts-ignore
+        setComandasAbertas(prev => [...prev, comandaComCliente]);
+        setComandaSelecionada(comandaComCliente);
+      } else {
+        carregarDados(); 
+      }
     } catch (error: any) {
       console.error('Erro ao confirmar abertura da comanda:', error);
       addToast(error.message || 'Erro ao abrir comanda.', 'error');
@@ -68,9 +79,10 @@ export const PDV: React.FC = () => {
 
   const handleFecharModal = () => {
     setComandaSelecionada(null);
-    carregarDados(); // Recarrega todos os dados para garantir consistência
+    // CORREÇÃO: Remove a chamada explícita para evitar o flicker.
+    // O useEffect fará o recarregamento necessário via isSyncing.
   };
-
+  
   const calcularTotalComanda = (comanda: Comanda) => {
     return comanda.itens?.reduce((total, item) => 
       total + (item.quantidade * item.valor_unit), 0
@@ -79,6 +91,10 @@ export const PDV: React.FC = () => {
 
   return (
     <div className="p-6">
+      <div className={`mb-4 p-2 text-center rounded-lg ${isOnline ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+        {isOnline ? 'Você está online. Dados sincronizados.' : 'Você está offline. Alterações serão salvas localmente.'}
+      </div>
+
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">PDV - Ponto de Venda</h1>
         <p className="text-gray-600">Gerencie comandas e vendas</p>
@@ -153,6 +169,7 @@ export const PDV: React.FC = () => {
           clientes={clientes}
           onClose={() => setNumeroParaAbrir(null)}
           onComandaAberta={handleConfirmarAbertura}
+          isOnline={isOnline}
         />
       )}
 
@@ -161,6 +178,7 @@ export const PDV: React.FC = () => {
           comandaInicial={comandaSelecionada}
           produtos={produtos}
           onClose={handleFecharModal}
+          isOnline={isOnline}
         />
       )}
     </div>

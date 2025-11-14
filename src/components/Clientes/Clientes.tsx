@@ -1,9 +1,14 @@
+// src/components/Clientes/Clientes.tsx (HÍBRIDO)
 import React, { useState, useEffect } from 'react';
 import { Plus, Users, Phone, Calendar, Trash2 } from 'lucide-react';
 import { clientesService } from '../../services/clientes';
 import { Cliente } from '../../types';
 import { ClienteModal } from './ClienteModal';
 import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
+import { useToast } from '../../contexts/ToastContext'; // Importe o Toast
+// === IMPORTS DOS NOVOS HOOKS ===
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { useSync } from '../../contexts/SyncContext';
 
 export const Clientes: React.FC = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -14,16 +19,24 @@ export const Clientes: React.FC = () => {
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false);
   const [clienteParaExcluir, setClienteParaExcluir] = useState<Cliente | null>(null);
 
+  // === NOVOS HOOKS ===
+  const { addToast } = useToast();
+  const { isSyncing } = useSync();
+  const { isOnline } = useOnlineStatus();
+
+  // Carrega na montagem e quando o status online/sync muda
   useEffect(() => {
     carregarClientes();
-  }, []);
+  }, [isOnline, isSyncing]);
 
   const carregarClientes = async () => {
     try {
-      const data = await clientesService.listar();
+      // 1. CORREÇÃO: Passa 'isOnline' para o serviço
+      const data = await clientesService.listar(isOnline);
       setClientes(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao carregar clientes:', error);
+      addToast(error.message || 'Erro ao carregar clientes.', 'error');
     }
   };
 
@@ -47,11 +60,13 @@ export const Clientes: React.FC = () => {
   const handleConfirmarExclusao = async () => {
     if (!clienteParaExcluir) return;
     try {
-      await clientesService.deletar(clienteParaExcluir.id);
+      // 2. CORREÇÃO: Passa 'isOnline' e o 'id'. O serviço cuida da fila.
+      await clientesService.deletar(isOnline, clienteParaExcluir.id);
+      addToast(`Cliente excluído ${isOnline ? '' : 'localmente.'}`, 'success');
       carregarClientes();
     } catch (error: any) {
       console.error('Erro ao excluir cliente:', error);
-      alert(error.message);
+      addToast(error.message || 'Não foi possível excluir o cliente.', 'error');
     } finally {
       setModalExcluirAberto(false);
       setClienteParaExcluir(null);
@@ -142,6 +157,7 @@ export const Clientes: React.FC = () => {
           cliente={clienteEdicao}
           onClose={() => { setModalAberto(false); setClienteEdicao(null); }}
           onClienteSalvo={handleClienteSalvo}
+          isOnline={isOnline} // 3. PASSA O STATUS PARA O MODAL
         />
       )}
 

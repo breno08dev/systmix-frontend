@@ -5,7 +5,8 @@ import {
   Package,
   Users,
   BarChart3,
-  LogOut
+  LogOut,
+  Wallet // NOVO: Ícone para o caixa
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -21,16 +22,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Home },
-    { id: 'pdv', label: 'PDV', icon: Receipt },
+    { id: 'caixa-rapido', label: 'Caixa Rápido', icon: Wallet }, // NOVO ITEM
+    { id: 'pdv', label: 'Comandas', icon: Receipt },
     { id: 'produtos', label: 'Produtos', icon: Package },
     { id: 'clientes', label: 'Clientes', icon: Users },
     { id: 'relatorios', label: 'Relatórios', icon: BarChart3 },
   ];
-
+  
+  // ... (Resto do código do Sidebar)
+  
   return (
     <div className="w-64 bg-primary text-white h-screen flex flex-col">
       <div className="p-6 border-b border-secondary">
-        <h1 className="text-2xl font-bold text-white">ComanDay</h1>
+        <h1 className="text-2xl font-bold text-white">Conect New</h1>
       </div>
       
       <nav className="flex-1 p-4">

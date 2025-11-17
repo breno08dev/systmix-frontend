@@ -5,11 +5,13 @@
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build && electron-builder",
-    "lint": "eslint .",
-    "preview": "vite preview"
-  },
+  "dev": "vite",
+  "build": "tsc && vite build && electron-builder",
+  "preview": "vite preview",
+  "lint": "eslint .",
+  "format": "prettier --write .",
+  "db:types": "npx supabase gen types typescript --project-id \"lxmbcxtvpyfargjqcqfr\" --schema public > src/types/supabase.d.ts"
+},
   "dependencies": {
     "@supabase/supabase-js": "^2.81.1",
     "better-sqlite3": "^12.4.1",
@@ -18,7 +20,8 @@
     "lucide-react": "^0.344.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-to-print": "^3.1.1"
+    "react-to-print": "^3.1.1",
+    "recharts": "^3.4.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",

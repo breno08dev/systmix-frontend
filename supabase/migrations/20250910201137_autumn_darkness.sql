@@ -167,3 +167,75 @@ INSERT INTO clientes (nome, telefone) VALUES
 ('Maria Santos', '(11) 88888-5678'),
 ('Pedro Oliveira', '(11) 77777-9012')
 ON CONFLICT DO NOTHING;
+
+-- 1. Cria a tabela 'caixa'
+CREATE TABLE IF NOT EXISTS caixa (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  data_abertura timestamptz NOT NULL DEFAULT now(),
+  valor_inicial decimal(10,2) NOT NULL,
+  data_fechamento timestamptz,
+  valor_final decimal(10,2)
+);
+
+-- 2. Adiciona um índice para garantir que só exista um caixa aberto
+CREATE UNIQUE INDEX IF NOT EXISTS idx_caixa_aberto
+ON caixa(data_fechamento)
+WHERE data_fechamento IS NULL;
+
+-- 3. Habilita Row Level Security (RLS) para a tabela
+ALTER TABLE caixa ENABLE ROW LEVEL SECURITY;
+
+-- 4. Cria as políticas de acesso (permite tudo para usuários logados)
+-- (Você pode ajustar isso se precisar de regras mais rígidas)
+CREATE POLICY "Usuários autenticados podem gerenciar o caixa" 
+ON caixa
+FOR ALL
+TO authenticated
+USING (true)
+WITH CHECK (true);
+
+-- 5. Função para ABRIR o caixa
+CREATE OR REPLACE FUNCTION abrir_caixa(p_valor_inicial decimal)
+RETURNS void AS $$
+BEGIN
+  -- Verifica se já existe um caixa aberto
+  IF EXISTS (SELECT 1 FROM caixa WHERE data_fechamento IS NULL) THEN
+    RAISE EXCEPTION 'Já existe um caixa aberto.';
+  END IF;
+
+  -- Insere o novo registro de caixa
+  INSERT INTO caixa (valor_inicial) VALUES (p_valor_inicial);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- 6. Função para FECHAR o caixa
+CREATE OR REPLACE FUNCTION fechar_caixa(p_id_caixa uuid, p_valor_final decimal)
+RETURNS void AS $$
+BEGIN
+  -- Atualiza o caixa para fechá-lo
+  UPDATE caixa
+  SET 
+    valor_final = p_valor_final,
+    data_fechamento = now()
+  WHERE 
+    id = p_id_caixa AND data_fechamento IS NULL;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Caixa não encontrado ou já está fechado.';
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- 7. Função para OBTER o caixa aberto
+CREATE OR REPLACE FUNCTION get_caixa_aberto()
+RETURNS SETOF caixa AS $$
+BEGIN
+  RETURN QUERY
+  SELECT *
+  FROM caixa
+  WHERE data_fechamento IS NULL
+  LIMIT 1;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

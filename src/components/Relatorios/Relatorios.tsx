@@ -1,4 +1,4 @@
-// src/components/Relatorios/Relatorios.tsx (LAYOUT HÍBRIDO FINAL)
+// src/components/Relatorios/Relatorios.tsx (CORRIGIDO E SEGURO)
 import React, { useEffect, useState } from 'react';
 import { Loader, DollarSign, ShoppingCart, Users, X, } from 'lucide-react';
 import { relatoriosService } from '../../services/relatorios';
@@ -8,45 +8,64 @@ import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 // --- Card de Resumo (Para "Hoje", "Ontem", etc.) ---
 interface ResumoCardProps {
   titulo: string;
-  dados: ResumoPeriodo;
+  dados: ResumoPeriodo; // 'dados' pode vir como undefined/null da API
 }
-const ResumoCard: React.FC<ResumoCardProps> = ({ titulo, dados }) => (
-  <div className="bg-white rounded-lg shadow-md p-5">
-    <h2 className="text-lg font-bold text-gray-800 mb-4">{titulo}</h2>
-    <div className="space-y-3">
-      <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-        <span className="text-sm font-semibold text-primary">Total Vendido</span>
-        <span className="text-lg font-bold text-primary">
-          R$ {dados.total_vendido.toFixed(2)}
-        </span>
-      </div>
-      <div className="flex justify-between items-center">
-        <span className="text-sm text-gray-500">Cartão</span>
-        <span className="text-sm font-medium text-gray-700">
-          R$ {dados.cartao.toFixed(2)}
-        </span>
-      </div>
-      <div className="flex justify-between items-center">
-        <span className="text-sm text-gray-500">PIX</span>
-        <span className="text-sm font-medium text-gray-700">
-          R$ {dados.pix.toFixed(2)}
-        </span>
-      </div>
-      <div className="flex justify-between items-center">
-        <span className="text-sm text-gray-500">Dinheiro</span>
-        <span className="text-sm font-medium text-gray-700">
-          R$ {dados.dinheiro.toFixed(2)}
-        </span>
-      </div>
-      <div className="flex justify-between items-center pt-3 border-t border-gray-100">
-        <span className="text-sm font-semibold text-gray-800">Total de Pedidos</span>
-        <span className="text-lg font-bold text-gray-800">
-          {dados.total_pedidos}
-        </span>
+
+// ==================================================================
+// CORREÇÃO DEFINITIVA APLICADA AQUI
+// ==================================================================
+const ResumoCard: React.FC<ResumoCardProps> = ({ titulo, dados }) => {
+  
+  // Se 'dados' for undefined ou null, 'dadosValidos' se torna um objeto
+  // com zeros. Isso impede o aplicativo de quebrar.
+  const dadosValidos = dados || { 
+    total_vendido: 0, 
+    cartao: 0, 
+    pix: 0, 
+    dinheiro: 0, 
+    total_pedidos: 0 
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-md p-5">
+      <h2 className="text-lg font-bold text-gray-800 mb-4">{titulo}</h2>
+      <div className="space-y-3">
+        <div className="flex justify-between items-center pb-3 border-b border-gray-100">
+          <span className="text-sm font-semibold text-primary">Total Vendido</span>
+          <span className="text-lg font-bold text-primary">
+            {/* Agora usamos 'dadosValidos' para garantir que nunca quebre */}
+            R$ {dadosValidos.total_vendido.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-sm text-gray-500">Cartão</span>
+          <span className="text-sm font-medium text-gray-700">
+            R$ {dadosValidos.cartao.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-sm text-gray-500">PIX</span>
+          <span className="text-sm font-medium text-gray-700">
+            R$ {dadosValidos.pix.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-sm text-gray-500">Dinheiro</span>
+          <span className="text-sm font-medium text-gray-700">
+            R$ {dadosValidos.dinheiro.toFixed(2)}
+          </span>
+        </div>
+        <div className="flex justify-between items-center pt-3 border-t border-gray-100">
+          <span className="text-sm font-semibold text-gray-800">Total de Pedidos</span>
+          <span className="text-lg font-bold text-gray-800">
+            {dadosValidos.total_pedidos}
+          </span>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
+
 
 // --- Card de Stats (Para a busca customizada) ---
 interface StatsCardProps {

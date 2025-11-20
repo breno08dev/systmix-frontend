@@ -1,6 +1,7 @@
 // src/components/Auth/LoginForm.tsx
 import React, { useState } from 'react';
 import { useAuth } from '../../auth/AuthContext'; // Importe o useAuth
+import logoConect from '../../assets/conectnew.logo.png';
 
 export const LoginForm: React.FC = () => {
   const { signIn } = useAuth(); // Use o hook
@@ -29,7 +30,7 @@ export const LoginForm: React.FC = () => {
       <div className="bg-white rounded-lg shadow-xl p-10 w-full max-w-md md:max-w-lg lg:max-w-xl">
         <div className="text-center mb-6">
           <img 
-            src="/conectnew.logo.png" 
+            src={logoConect}
             alt="Logo ConectNew" 
             className="w-72 h-auto mx-auto" 
           />

@@ -1,22 +1,25 @@
-import { app as e, BrowserWindow as r } from "electron";
-import n from "path";
-import { fileURLToPath as l } from "url";
-const i = process.env.VITE_DEV_SERVER_URL, s = l(import.meta.url), t = n.dirname(s);
-function a() {
-  const o = new r({
+import { app as e, BrowserWindow as a } from "electron";
+import o from "path";
+import { fileURLToPath as c } from "url";
+const l = c(import.meta.url), n = o.dirname(l), t = process.env.VITE_DEV_SERVER_URL;
+function r() {
+  const s = t ? o.join(n, "../public/favicon.conect.png") : o.join(n, "../dist/favicon.conect.png"), i = new a({
     width: 1280,
     height: 720,
+    icon: s,
+    // <--- Usa o caminho calculado acima
     webPreferences: {
-      // Agora o path.join funciona, pois __dirname está definido
-      preload: n.join(t, "preload.js")
+      preload: o.join(n, "preload.js"),
+      nodeIntegration: !1,
+      contextIsolation: !0
     }
   });
-  i ? (o.loadURL(i), o.webContents.openDevTools()) : o.loadFile(n.join(t, "../dist/index.html"));
+  i.setMenuBarVisibility(!1), t ? i.loadURL(t) : i.loadFile(o.join(n, "../dist/index.html"));
 }
-e.whenReady().then(a);
+e.whenReady().then(r);
 e.on("window-all-closed", () => {
   process.platform !== "darwin" && e.quit();
 });
 e.on("activate", () => {
-  r.getAllWindows().length === 0 && a();
+  a.getAllWindows().length === 0 && r();
 });

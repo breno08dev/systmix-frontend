@@ -5,19 +5,39 @@ import { relatoriosService } from '../../services/relatorios';
 import { ResumoDashboard, ResumoPeriodo, RelatorioVendas } from '../../types';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 
+// --- Funções Auxiliares de Data (Novas/Corrigidas) ---
+
+/**
+ * Converte a string YYYY-MM-DD (do input date) para o início do dia (00:00:00)
+ * no fuso horário local e depois em ISO string para o Supabase.
+ */
+const formatarDataInicio = (dateString: string): string => {
+  // Cria um objeto Date com base no fuso horário local (00:00:00)
+  const date = new Date(`${dateString}T00:00:00`); 
+  // Retorna a string ISO (ex: 2025-11-19T03:00:00.000Z se estiver no Brasil)
+  return date.toISOString(); 
+};
+
+/**
+ * Converte a string YYYY-MM-DD (do input date) para o final do dia (23:59:59)
+ * no fuso horário local e depois em ISO string para o Supabase.
+ */
+const formatarDataFim = (dateString: string): string => {
+  // Cria um objeto Date com base no fuso horário local (23:59:59)
+  const date = new Date(`${dateString}T23:59:59`);
+  // Retorna a string ISO
+  return date.toISOString();
+};
+// --- FIM das Funções Auxiliares de Data ---
+
+
 // --- Card de Resumo (Para "Hoje", "Ontem", etc.) ---
 interface ResumoCardProps {
   titulo: string;
-  dados: ResumoPeriodo; // 'dados' pode vir como undefined/null da API
+  dados: ResumoPeriodo;
 }
 
-// ==================================================================
-// CORREÇÃO DEFINITIVA APLICADA AQUI
-// ==================================================================
 const ResumoCard: React.FC<ResumoCardProps> = ({ titulo, dados }) => {
-  
-  // Se 'dados' for undefined ou null, 'dadosValidos' se torna um objeto
-  // com zeros. Isso impede o aplicativo de quebrar.
   const dadosValidos = dados || { 
     total_vendido: 0, 
     cartao: 0, 
@@ -33,7 +53,6 @@ const ResumoCard: React.FC<ResumoCardProps> = ({ titulo, dados }) => {
         <div className="flex justify-between items-center pb-3 border-b border-gray-100">
           <span className="text-sm font-semibold text-primary">Total Vendido</span>
           <span className="text-lg font-bold text-primary">
-            {/* Agora usamos 'dadosValidos' para garantir que nunca quebre */}
             R$ {dadosValidos.total_vendido.toFixed(2)}
           </span>
         </div>
@@ -88,15 +107,15 @@ export const Relatorios: React.FC = () => {
   const { isOnline } = useOnlineStatus();
   
   // Estados dos relatórios
-  const [resumo, setResumo] = useState<ResumoDashboard | null>(null); // Para "Hoje", "Ontem"...
-  const [relatorioCustom, setRelatorioCustom] = useState<RelatorioVendas | null>(null); // Para a busca
+  const [resumo, setResumo] = useState<ResumoDashboard | null>(null);
+  const [relatorioCustom, setRelatorioCustom] = useState<RelatorioVendas | null>(null);
 
   // Estados de controle
   const [loadingResumo, setLoadingResumo] = useState(true);
   const [loadingCustom, setLoadingCustom] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Estados dos filtros de data
+  // Estados dos filtros de data (mantidos como YYYY-MM-DD para o input type="date")
   const [dataInicio, setDataInicio] = useState(new Date().toISOString().split('T')[0]);
   const [dataFim, setDataFim] = useState(new Date().toISOString().split('T')[0]);
 
@@ -124,13 +143,25 @@ export const Relatorios: React.FC = () => {
       setError("Busca indisponível offline.");
       return;
     }
+    
+    // VERIFICAÇÃO ADICIONAL: Se dataInicio > dataFim
+    if (new Date(dataInicio).getTime() > new Date(dataFim).getTime()) {
+        setError("A Data Início não pode ser maior que a Data Fim.");
+        return;
+    }
+
     setLoadingCustom(true);
     setError(null);
-    setRelatorioCustom(null); // Limpa o anterior
+    setRelatorioCustom(null); 
     
-    // Chama o serviço que busca por período
-    relatoriosService.obterVendasPorPeriodo(dataInicio, dataFim)
-      .then(setRelatorioCustom) // Salva no estado 'relatorioCustom'
+    // *******************************************************************
+    // ** A CORREÇÃO CRÍTICA É AQUI: ENVIAR COM HORA INICIAL E FINAL **
+    // *******************************************************************
+    const dataInicioFormatada = formatarDataInicio(dataInicio);
+    const dataFimFormatada = formatarDataFim(dataFim);
+
+    relatoriosService.obterVendasPorPeriodo(dataInicioFormatada, dataFimFormatada)
+      .then(setRelatorioCustom) 
       .catch(err => {
         console.error(err);
         setError(err.message || "Erro ao gerar relatório customizado.");
@@ -244,9 +275,9 @@ export const Relatorios: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {relatorioCustom.pagamentos_por_metodo.map((metodo) => (
-                    <tr key={metodo.metodo_agrupado}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{metodo.metodo_agrupado}</td>
+                  {relatorioCustom.pagamentos_por_metodo.map((metodo: any) => (
+                    <tr key={metodo.metodo}>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{metodo.metodo}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 text-right">R$ {metodo.total.toFixed(2)}</td>
                     </tr>
                   ))}

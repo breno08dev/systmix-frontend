@@ -29,11 +29,11 @@ export const LoginForm: React.FC = () => {
       <div className="bg-white rounded-lg shadow-xl p-10 w-full max-w-md md:max-w-lg lg:max-w-xl">
         <div className="text-center mb-6">
           <img 
-            src="/nexts.logo1.png" 
-            alt="Logo NextSys" 
+            src="/conectnew.logo.png" 
+            alt="Logo ConectNew" 
             className="w-72 h-auto mx-auto" 
           />
-          <p className="mt-2 text-gray-600 text-base">Sistema de Gerenciamento</p>
+          
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">

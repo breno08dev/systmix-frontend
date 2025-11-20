@@ -1,17 +1,19 @@
+
 {
-  "name": "systmix-desktop",
+  "name": "conectnew-desktop",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "main": "dist-electron/main.js",
   "scripts": {
-  "dev": "vite",
-  "build": "tsc && vite build && electron-builder",
-  "preview": "vite preview",
-  "lint": "eslint .",
-  "format": "prettier --write .",
-  "db:types": "npx supabase gen types typescript --project-id \"lxmbcxtvpyfargjqcqfr\" --schema public > src/types/supabase.d.ts"
-},
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "pack": "electron-builder",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "db:types": "npx supabase gen types typescript --project-id \"lxmbcxtvpyfargjqcqfr\" --schema public > src/types/supabase.d.ts"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.81.1",
     "better-sqlite3": "^12.4.1",
@@ -48,10 +50,12 @@
   },
   "build": {
     "appId": "com.systmix.app",
-    "productName": "SystMix",
+    "productName": "ConectNew",
+    "icon": "favicon.conect.png", 
     "files": [
       "dist/**/*",
-      "dist-electron/**/*"
+      "dist-electron/**/*",
+      "favicon.conect.png" 
     ],
     "directories": {
       "output": "release"

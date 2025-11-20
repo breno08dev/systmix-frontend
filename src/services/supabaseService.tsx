@@ -2,9 +2,9 @@
 // Contém APENAS a lógica que fala com o Supabase (Online).
 
 import { supabase } from '../lib/supabaseClient';
-import { Comanda, ItemComanda, Pagamento, Produto, Cliente } from '../types';
+import { Comanda, ItemComanda, Pagamento, Produto, Cliente, Caixa } from '../types';
 
-// --- Mappers (copiados dos seus arquivos originais) ---
+// --- Mappers ---
 function mapSupabaseComandaToComanda(data: any): Comanda {
   return {
     ...data,
@@ -24,18 +24,50 @@ function mapSupabaseProdutoToProduto(data: any): Produto {
 function mapSupabaseClienteToCliente(data: any): Cliente {
   return { ...data, telefone: data.telefone || undefined, criado_em: data.criado_em || new Date().toISOString() };
 }
+function mapSupabaseCaixaToCaixa(data: any): Caixa {
+    return {
+        id: data.id,
+        data_abertura: data.data_abertura,
+        valor_inicial: data.valor_inicial,
+        data_fechamento: data.data_fechamento,
+        valor_final: data.valor_final,
+    };
+}
 
-// =========================================================
-// === INÍCIO DA CORREÇÃO (erro da imagem image_3659a3.png) ===
-// =========================================================
-function lancarErroSupabase(error: any): never { // 1. Adicionado ': never'
+
+function lancarErroSupabase(error: any): never {
   console.error('Erro no Supabase:', error);
   const mensagemErro = error.details || error.message || 'Ocorreu um erro na operação com o banco de dados.';
-  throw new Error(mensagemErro); // 2. Garantido que sempre vai "throw"
+  throw new Error(mensagemErro);
 }
-// =========================================================
-// === FIM DA CORREÇÃO ===
-// =========================================================
+
+// --- Serviço de Caixa ---
+export const supabaseCaixaService = {
+  // Chamada à função SQL: get_caixa_aberto()
+  async obterCaixaAberto(): Promise<Caixa | null> {
+    const { data, error } = await supabase.rpc('get_caixa_aberto').limit(1);
+    
+    if (error) lancarErroSupabase(error);
+    if (!data || data.length === 0) return null;
+
+    return mapSupabaseCaixaToCaixa(data[0]);
+  },
+
+  // Chamada à função SQL: abrir_caixa(p_valor_inicial)
+  async abrirCaixa(valorInicial: number): Promise<void> {
+    const { error } = await supabase.rpc('abrir_caixa', { p_valor_inicial: valorInicial.toFixed(2) });
+    if (error) lancarErroSupabase(error);
+  },
+
+  // Chamada à função SQL: fechar_caixa(p_id_caixa, p_valor_final)
+  async fecharCaixa(idCaixa: string, valorFinal: number): Promise<void> {
+    const { error } = await supabase.rpc('fechar_caixa', { 
+      p_id_caixa: idCaixa, 
+      p_valor_final: valorFinal.toFixed(2) // Valor contado pelo usuário
+    });
+    if (error) lancarErroSupabase(error);
+  },
+};
 
 // --- Serviço de Comandas ---
 export const supabaseComandasService = {
@@ -60,7 +92,6 @@ export const supabaseComandasService = {
     if (rpcError) lancarErroSupabase(rpcError);
     if (!rpcData) lancarErroSupabase({ message: 'A função RPC não retornou dados.' });
 
-    // 3. O TypeScript agora sabe que rpcData NÃO é nulo aqui.
     const { data: itemCompleto, error: itemError } = await supabase
       .from('itens_comanda')
       .select('*, produto:produtos(*)')

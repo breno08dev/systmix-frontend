@@ -7,31 +7,32 @@ import { Comanda, Produto } from '../../types';
 import { Comprovante } from './Comprovante';
 import { useToast } from '../../contexts/ToastContext';
 
+const METODOS_PAGAMENTO_COMANDA = {
+    DINHEIRO: 'Dinheiro - Comanda',
+    CARTAO: 'Cartão - Comanda',
+    PIX: 'Pix - Comanda',
+};
+
 interface ComandaModalProps {
   comandaInicial: Comanda;
   produtos: Produto[];
-  onClose: () => void;
+  onClose: (idComandaFechada?: string) => void;
   isOnline: boolean;
+  onItemUpdated: (comandaId: string) => void; // NOVO: Callback para notificar o pai
 }
 
-// =========================================================
-// === INÍCIO DA CORREÇÃO (erro da imagem image_3841a9.png) ===
-// =========================================================
-// Mudando de 'export const' para 'export default' para forçar o TS a limpar o cache
 export default function ComandaModal({
   comandaInicial,
   produtos,
   onClose,
   isOnline,
+  onItemUpdated, // Recebe a nova prop
 }: ComandaModalProps) {
-// =========================================================
-// === FIM DA CORREÇÃO ===
-// =========================================================
 
   const [comandaAtual, setComandaAtual] = useState<Comanda>(comandaInicial);
   const [produtoSelecionado, setProdutoSelecionado] = useState<string>('');
   const [mostrarPagamento, setMostrarPagamento] = useState(false);
-  const [metodoPagamento, setMetodoPagamento] = useState('dinheiro');
+  const [metodoPagamento, setMetodoPagamento] = useState(METODOS_PAGAMENTO_COMANDA.DINHEIRO);
   const [valorPagamento, setValorPagamento] = useState('');
   const [carregando, setCarregando] = useState(false);
   
@@ -61,25 +62,29 @@ export default function ComandaModal({
         valor_unit: produto.preco,
       });
 
-      // Atualização otimista (precisa ser melhorada para offline)
       if (itemRetornado) {
         setComandaAtual(prevComanda => {
           const itensAtuais = prevComanda.itens || [];
-          // @ts-ignore
-          const itemExistenteIndex = itensAtuais.findIndex(i => i.id_produto === itemRetornado.id_produto);
+          
+          const itemExistenteIndex = itensAtuais.findIndex(i => i.id === itemRetornado.id);
           let novosItens;
+          
           if (itemExistenteIndex > -1) {
-            // @ts-ignore
-            novosItens = [...itensAtuais.slice(0, itemExistenteIndex), itemRetornado, ...itensAtuais.slice(itemExistenteIndex + 1)];
+            novosItens = [...itensAtuais];
+            novosItens[itemExistenteIndex] = itemRetornado;
           } else {
-            // @ts-ignore
             novosItens = [...itensAtuais, itemRetornado];
           }
+          
           return { ...prevComanda, itens: novosItens };
         });
+        
+        // NOVO: Notifica o componente pai para atualizar o total no cabeçalho
+        onItemUpdated(comandaAtual.id); 
+
       } else if (!isOnline) {
-        addToast('Item adicionado localmente.', 'success');
-        // TODO: A 'localDatabaseService.adicionarItem' deve retornar o item
+        // CORREÇÃO: Usado 'success' para o caso offline
+        addToast('Item adicionado localmente. Será sincronizado quando online.', 'success'); 
       }
       
       setProdutoSelecionado('');
@@ -103,10 +108,11 @@ export default function ComandaModal({
 
     try {
       await comandasService.atualizarQuantidadeItem(isOnline, comandaAtual.id, itemId, novaQuantidade);
+      onItemUpdated(comandaAtual.id); // Adicionado para atualizar o PDV ao alterar QTD
     } catch (error: any) {
       console.error('Erro ao alterar quantidade:', error);
       addToast(error.message || 'Erro ao atualizar quantidade.', 'error');
-      setComandaAtual(estadoAnterior);
+      setComandaAtual(estadoAnterior); 
     }
   };
 
@@ -120,6 +126,7 @@ export default function ComandaModal({
     try {
       await comandasService.removerItem(isOnline, comandaAtual.id, itemId);
       addToast('Item removido.', 'success');
+      onItemUpdated(comandaAtual.id); // Adicionado para atualizar o PDV ao remover item
     } catch (error: any) {
       console.error('Erro ao remover item:', error);
       addToast(error.message || 'Erro ao remover item.', 'error');
@@ -133,7 +140,7 @@ export default function ComandaModal({
       return;
     }
     const valorPago = parseFloat(valorPagamento) || totalComanda;
-    if (metodoPagamento === 'dinheiro' && valorPago < totalComanda) {
+    if (metodoPagamento === METODOS_PAGAMENTO_COMANDA.DINHEIRO && valorPago < totalComanda) {
       addToast('O valor pago não pode ser menor que o total da comanda.', 'error');
       return;
     }
@@ -145,10 +152,14 @@ export default function ComandaModal({
         valor: totalComanda,
       }]);
       addToast(`Comanda fechada ${isOnline ? 'com sucesso' : '(offline)'}!`, 'success');
-      onClose(); 
+      
+      onClose(comandaAtual.id); 
+      
     } catch (error: any) {
       console.error('Erro ao fechar comanda:', error);
       addToast(error.message || 'Não foi possível fechar a comanda.', 'error');
+      
+      onClose();
     } finally {
       setCarregando(false);
     }
@@ -180,7 +191,7 @@ export default function ComandaModal({
               <button onClick={handlePrint} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg" title="Imprimir Comprovante" disabled={totalComanda <= 0}>
                 <Printer size={20} />
               </button>
-              <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+              <button onClick={() => onClose()} className="p-2 hover:bg-gray-100 rounded-lg">
                 <X size={24} />
               </button>
             </div>
@@ -249,16 +260,16 @@ export default function ComandaModal({
                 <div className="space-y-4">
                   <h4 className="text-lg font-semibold text-gray-800">Finalizar Pagamento</h4>
                   <div className="grid grid-cols-3 gap-3">
-                    <button onClick={() => setMetodoPagamento('dinheiro')} className={`p-3 rounded-lg border-2 flex items-center justify-center gap-2 transition-all ${metodoPagamento === 'dinheiro' ? 'border-secondary bg-gray-100' : 'border-gray-300 hover:border-gray-400'}`}><Banknote size={20} /> Dinheiro</button>
-                    <button onClick={() => setMetodoPagamento('cartao')} className={`p-3 rounded-lg border-2 flex items-center justify-center gap-2 transition-all ${metodoPagamento === 'cartao' ? 'border-secondary bg-gray-100' : 'border-gray-300 hover:border-gray-400'}`}><CreditCard size={20} /> Cartão</button>
-                    <button onClick={() => setMetodoPagamento('pix')} className={`p-3 rounded-lg border-2 flex items-center justify-center gap-2 transition-all ${metodoPagamento === 'pix' ? 'border-secondary bg-gray-100' : 'border-gray-300 hover:border-gray-400'}`}><QrCode size={20} /> PIX</button>
+                    <button onClick={() => setMetodoPagamento(METODOS_PAGAMENTO_COMANDA.DINHEIRO)} className={`p-3 rounded-lg border-2 flex items-center justify-center gap-2 transition-all ${metodoPagamento === METODOS_PAGAMENTO_COMANDA.DINHEIRO ? 'border-secondary bg-gray-100' : 'border-gray-300 hover:border-gray-400'}`}><Banknote size={20} /> Dinheiro</button>
+                    <button onClick={() => setMetodoPagamento(METODOS_PAGAMENTO_COMANDA.CARTAO)} className={`p-3 rounded-lg border-2 flex items-center justify-center gap-2 transition-all ${metodoPagamento === METODOS_PAGAMENTO_COMANDA.CARTAO ? 'border-secondary bg-gray-100' : 'border-gray-300 hover:border-gray-400'}`}><CreditCard size={20} /> Cartão</button>
+                    <button onClick={() => setMetodoPagamento(METODOS_PAGAMENTO_COMANDA.PIX)} className={`p-3 rounded-lg border-2 flex items-center justify-center gap-2 transition-all ${metodoPagamento === METODOS_PAGAMENTO_COMANDA.PIX ? 'border-secondary bg-gray-100' : 'border-gray-300 hover:border-gray-400'}`}><QrCode size={20} /> PIX</button>
                   </div>
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <div className="flex justify-between items-center mb-3">
                       <label htmlFor="valorPago" className="text-sm font-medium text-gray-600">Total a Pagar</label>
                       <span className="text-xl font-bold text-gray-800">R$ {totalComanda.toFixed(2).replace('.', ',')}</span>
                     </div>
-                    {metodoPagamento === 'dinheiro' && (
+                    {metodoPagamento === METODOS_PAGAMENTO_COMANDA.DINHEIRO && (
                       <div>
                         <input id="valorPago" type="number" step="0.01" min={totalComanda} placeholder="Valor entregue pelo cliente" value={valorPagamento} onChange={(e) => setValorPagamento(e.target.value)} className="w-full p-3 border border-gray-300 rounded-lg text-lg focus:ring-2 focus:ring-secondary" />
                         {troco > 0 && (
@@ -272,7 +283,7 @@ export default function ComandaModal({
                   </div>
                   <div className="flex gap-3">
                     <button onClick={() => { setMostrarPagamento(false); setValorPagamento(''); }} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium" disabled={carregando}>Cancelar</button>
-                    <button onClick={fecharComanda} disabled={carregando || (metodoPagamento === 'dinheiro' && valorPagoFloat < totalComanda)} className="flex-1 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium disabled:bg-gray-300 disabled:cursor-not-allowed">
+                    <button onClick={fecharComanda} disabled={carregando || (metodoPagamento === METODOS_PAGAMENTO_COMANDA.DINHEIRO && valorPagoFloat < totalComanda)} className="flex-1 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium disabled:bg-gray-300 disabled:cursor-not-allowed">
                       {carregando ? 'Processando...' : 'Confirmar Pagamento'}
                     </button>
                   </div>

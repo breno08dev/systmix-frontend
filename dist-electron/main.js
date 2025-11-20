@@ -1,33 +1,22 @@
-import { app, BrowserWindow } from "electron";
-import path from "path";
-import { fileURLToPath } from "url";
-const isDev = process.env.VITE_DEV_SERVER_URL;
-const __filename$1 = fileURLToPath(import.meta.url);
-const __dirname$1 = path.dirname(__filename$1);
-function createWindow() {
-  const mainWindow = new BrowserWindow({
+import { app as e, BrowserWindow as r } from "electron";
+import n from "path";
+import { fileURLToPath as l } from "url";
+const i = process.env.VITE_DEV_SERVER_URL, s = l(import.meta.url), t = n.dirname(s);
+function a() {
+  const o = new r({
     width: 1280,
     height: 720,
     webPreferences: {
       // Agora o path.join funciona, pois __dirname está definido
-      preload: path.join(__dirname$1, "preload.js")
+      preload: n.join(t, "preload.js")
     }
   });
-  if (isDev) {
-    mainWindow.loadURL(isDev);
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(path.join(__dirname$1, "../dist/index.html"));
-  }
+  i ? (o.loadURL(i), o.webContents.openDevTools()) : o.loadFile(n.join(t, "../dist/index.html"));
 }
-app.whenReady().then(createWindow);
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+e.whenReady().then(a);
+e.on("window-all-closed", () => {
+  process.platform !== "darwin" && e.quit();
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+e.on("activate", () => {
+  r.getAllWindows().length === 0 && a();
 });

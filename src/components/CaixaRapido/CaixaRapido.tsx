@@ -8,23 +8,17 @@ import { Produto, ItemComanda } from '../../types';
 import { CaixaModal } from './CaixaModal';
 import { useToast } from '../../contexts/ToastContext';
 import { localDatabaseService } from '../../lib/localDatabase';
-// NOVO: Importar o comandasService para a lógica online
 import { comandasService } from '../../services/comandas';
 
-// ▼▼▼ FUNÇÃO ATUALIZADA (AGORA HÍBRIDA) ▼▼▼
-// Agora ela decide se usa o serviço Online (comandasService) ou Offline (localDatabaseService)
 const criarVendaRapida = async (isOnline: boolean, produtosNoCarrinho: Produto[], pagamentos: { metodo: string; valor: number }[]) => {
   if (produtosNoCarrinho.length === 0) return;
 
   if (isOnline) {
-    // --- CAMINHO ONLINE ---
     console.log("ONLINE: Registrando Venda Rápida via Supabase...");
     try {
-      // 1. Criar Comanda online
-      const comanda = await comandasService.criarComanda(isOnline, 0, undefined); // 0 = Venda Rápida
+      const comanda = await comandasService.criarComanda(isOnline, 0, undefined); 
       if (!comanda) throw new Error("Não foi possível criar a comanda online.");
 
-      // 2. Adicionar Itens online
       for (const produto of produtosNoCarrinho) {
         const item: Omit<ItemComanda, 'id' | 'id_comanda' | 'criado_em'> = {
           id_produto: produto.id,
@@ -34,19 +28,15 @@ const criarVendaRapida = async (isOnline: boolean, produtosNoCarrinho: Produto[]
         await comandasService.adicionarItem(isOnline, comanda.id, item);
       }
 
-      // 3. Fechar Comanda online
       await comandasService.fecharComanda(isOnline, comanda.id, pagamentos);
       console.log("ONLINE: Venda Rápida registrada com sucesso.");
       
     } catch (error) {
       console.error("ERRO na Venda Rápida ONLINE:", error);
-      // Fallback para offline? (Opcional)
-      // Por enquanto, vamos lançar o erro para o usuário saber.
       throw new Error("Falha ao registrar venda online. Verifique a conexão.");
     }
 
   } else {
-    // --- CAMINHO OFFLINE (Como estava antes) ---
     console.log("OFFLINE: Criando comanda no Dexie/SQLite");
     const comanda = await localDatabaseService.criarComanda(0, undefined); 
     
@@ -56,11 +46,9 @@ const criarVendaRapida = async (isOnline: boolean, produtosNoCarrinho: Produto[]
         quantidade: 1, 
         valor_unit: produto.preco,
       };
-      // O log que você viu
       console.log("OFFLINE: Adicionando item localmente");
       const novoItem = await localDatabaseService.adicionarItem(comanda.id, item);
       
-      // O log que você viu
       await localDatabaseService.addPendingAction('ADICIONAR_ITEM', { idComanda: comanda.id, item: novoItem });
     }
 
@@ -69,13 +57,14 @@ const criarVendaRapida = async (isOnline: boolean, produtosNoCarrinho: Produto[]
     await localDatabaseService.addPendingAction('FECHAR_COMANDA', { idComanda: comanda.id, pagamentos });
   }
 };
-// ▲▲▲ FIM DA FUNÇÃO ATUALIZADA ▲▲▲
 
-const METODOS_PAGAMENTO = ['Dinheiro', 'Pix', 'Cartão'];
+// CORREÇÃO: Padronização dos métodos com a origem "Cx.Rapido"
+const METODOS_PAGAMENTO_RAPIDO = ['Dinheiro Cx.Rapido', 'Pix Cx.Rapido', 'Cartão Cx.Rapido'];
+
 
 export const CaixaRapido: React.FC = () => {
   const { isOnline } = useOnlineStatus();
-  const { caixaAberto, caixaSession } = useCaixa();
+  const { caixaAberto,  } = useCaixa();
   const { addToast } = useToast();
   
   const [produtos, setProdutos] = useState<Produto[]>([]);
@@ -118,7 +107,6 @@ export const CaixaRapido: React.FC = () => {
         return;
       }
 
-      // A 'isOnline' do hook é passada aqui
       await criarVendaRapida(isOnline, produtosNoCarrinho, pagamentos);
       
       setProdutosNoCarrinho([]);
@@ -128,7 +116,6 @@ export const CaixaRapido: React.FC = () => {
       if (troco > 0) {
         successMessage += ` Troco: R$ ${troco.toFixed(2)}.`;
       }
-      // Se estava online, foi direto. Se estava offline, mostrará a msg de sincronização.
       if (!isOnline) {
         successMessage += " A venda será sincronizada quando houver conexão.";
       }
@@ -147,13 +134,13 @@ export const CaixaRapido: React.FC = () => {
     setModalCaixaAberto(true);
   };
   
-  // Componente VendaRapidaModal (Sem alterações, mantendo a correção do troco)
   const VendaRapidaModal: React.FC<{
     total: number;
     onClose: () => void;
     onFinalizar: (pagamentos: { metodo: string; valor: number }[], troco: number) => void;
   }> = ({ total, onClose, onFinalizar }) => {
-    const [pagamentos, setPagamentos] = useState([{ metodo: METODOS_PAGAMENTO[0], valor: total }]);
+    // Usa a lista padronizada para o Caixa Rápido
+    const [pagamentos, setPagamentos] = useState([{ metodo: METODOS_PAGAMENTO_RAPIDO[0], valor: total }]);
     const [valorRestante, setValorRestante] = useState(0);
     const [troco, setTroco] = useState(0);
     const [totalPago, setTotalPago] = useState(total);
@@ -174,7 +161,8 @@ export const CaixaRapido: React.FC = () => {
 
     const handleAdicionarPagamento = () => {
       const valorParaNovoPagamento = valorRestante > 0.01 ? valorRestante : 0;
-      setPagamentos(prev => [...prev, { metodo: METODOS_PAGAMENTO[0], valor: valorParaNovoPagamento }]);
+      // Usa a lista padronizada
+      setPagamentos(prev => [...prev, { metodo: METODOS_PAGAMENTO_RAPIDO[0], valor: valorParaNovoPagamento }]);
     };
     
     const handleRemoverPagamento = (index: number) => {
@@ -212,7 +200,8 @@ export const CaixaRapido: React.FC = () => {
                   onChange={(e) => handleUpdatePagamento(index, 'metodo', e.target.value)}
                   className="flex-1 p-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary"
                 >
-                  {METODOS_PAGAMENTO.map(metodo => (
+                  {/* Usa a lista padronizada */}
+                  {METODOS_PAGAMENTO_RAPIDO.map(metodo => (
                     <option key={metodo} value={metodo}>{metodo}</option>
                   ))}
                 </select>
@@ -278,7 +267,6 @@ export const CaixaRapido: React.FC = () => {
     );
   };
 
-  // JSX Principal (Sem alterações)
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-8">
@@ -305,7 +293,6 @@ export const CaixaRapido: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-3 gap-6">
-        {/* Coluna de Produtos */}
         <div className="col-span-2 bg-white rounded-lg shadow-md p-4 max-h-[80vh] overflow-y-auto">
           <h2 className="text-xl font-bold text-gray-900 mb-4">Cardápio</h2>
           
@@ -341,7 +328,6 @@ export const CaixaRapido: React.FC = () => {
           </div>
         </div>
 
-        {/* Coluna do Carrinho */}
         <div className="col-span-1 bg-white rounded-lg shadow-md flex flex-col max-h-[80vh]">
           <div className="p-4 border-b">
             <h2 className="text-xl font-bold text-gray-900">

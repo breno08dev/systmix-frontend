@@ -1,4 +1,4 @@
-// src/components/PDV/PDV.tsx (CORREÇÃO DO FLICKER)
+// src/components/PDV/PDV.tsx (CORREÇÃO DE SINCRONIZAÇÃO DO TOTAL)
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart } from 'lucide-react';
 import { comandasService } from '../../services/comandas';
@@ -30,7 +30,6 @@ export const PDV: React.FC = () => {
 
   const carregarDados = async () => {
     setCarregando(true);
-    // addToast removido anteriormente para evitar repetição
     try {
       const [comandasData, produtosData, clientesData] = await Promise.all([
         comandasService.listarAbertas(isOnline),
@@ -77,10 +76,19 @@ export const PDV: React.FC = () => {
     }
   };
 
-  const handleFecharModal = () => {
+  const handleFecharModal = (idComandaFechada?: string) => {
     setComandaSelecionada(null);
-    // CORREÇÃO: Remove a chamada explícita para evitar o flicker.
-    // O useEffect fará o recarregamento necessário via isSyncing.
+    if (idComandaFechada) {
+        setComandasAbertas(prev => prev.filter(c => c.id !== idComandaFechada));
+        carregarDados(); 
+    }
+  };
+  
+  // NOVO: Chamado pelo modal após adicionar/atualizar um item
+  const handleItemAtualizado = (comandaId: string) => {
+      // Força o recarregamento dos dados para atualizar o total na lista de comandas abertas
+      // O flicker será mínimo, mas garante a consistência do total na tela
+      carregarDados(); 
   };
   
   const calcularTotalComanda = (comanda: Comanda) => {
@@ -177,7 +185,8 @@ export const PDV: React.FC = () => {
         <ComandaModal
           comandaInicial={comandaSelecionada}
           produtos={produtos}
-          onClose={handleFecharModal}
+          onClose={handleFecharModal} 
+          onItemUpdated={handleItemAtualizado} // NOVO: Passa a função de atualização
           isOnline={isOnline}
         />
       )}

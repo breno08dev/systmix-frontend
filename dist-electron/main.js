@@ -1,25 +1,37 @@
-import { app as e, BrowserWindow as a } from "electron";
-import o from "path";
-import { fileURLToPath as c } from "url";
-const l = c(import.meta.url), n = o.dirname(l), t = process.env.VITE_DEV_SERVER_URL;
-function r() {
-  const s = t ? o.join(n, "../public/favicon.conect.png") : o.join(n, "../dist/favicon.conect.png"), i = new a({
+import { app, BrowserWindow } from "electron";
+import path from "path";
+import { fileURLToPath } from "url";
+const __filename$1 = fileURLToPath(import.meta.url);
+const __dirname$1 = path.dirname(__filename$1);
+const isDev = process.env.VITE_DEV_SERVER_URL;
+function createWindow() {
+  const iconPath = isDev ? path.join(__dirname$1, "../public/favicon.conect.png") : path.join(__dirname$1, "../dist/favicon.conect.png");
+  const mainWindow = new BrowserWindow({
     width: 1280,
     height: 720,
-    icon: s,
+    icon: iconPath,
     // <--- Usa o caminho calculado acima
     webPreferences: {
-      preload: o.join(n, "preload.js"),
-      nodeIntegration: !1,
-      contextIsolation: !0
+      preload: path.join(__dirname$1, "preload.js"),
+      nodeIntegration: false,
+      contextIsolation: true
     }
   });
-  i.setMenuBarVisibility(!1), t ? i.loadURL(t) : i.loadFile(o.join(n, "../dist/index.html"));
+  mainWindow.setMenuBarVisibility(false);
+  if (isDev) {
+    mainWindow.loadURL(isDev);
+  } else {
+    mainWindow.loadFile(path.join(__dirname$1, "../dist/index.html"));
+  }
 }
-e.whenReady().then(r);
-e.on("window-all-closed", () => {
-  process.platform !== "darwin" && e.quit();
+app.whenReady().then(createWindow);
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
 });
-e.on("activate", () => {
-  a.getAllWindows().length === 0 && r();
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });

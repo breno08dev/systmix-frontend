@@ -1,100 +1,121 @@
 // src/components/CaixaRapido/CaixaModal.tsx
-import React, { useState } from 'react';
-import { X, DollarSign } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import Modal from '../Shared/Modal';
+import { CheckCircle, Lock, Unlock } from 'lucide-react';
 import { useCaixa } from '../../contexts/CaixaContext';
 
+// Props específicas para a tela de PDV
 interface CaixaModalProps {
-  isClosing: boolean;
+  isOpen: boolean;
+  isClosing: boolean; // True = Fechar Caixa, False = Abrir Caixa
   onClose: () => void;
+  // Opcionais para compatibilidade com o outro uso (sangria/suprimento)
+  type?: string; 
+  onSubmit?: (val: number, obs?: string) => void;
 }
 
-export const CaixaModal: React.FC<CaixaModalProps> = ({ isClosing, onClose }) => {
-  const { caixaSession, abrirCaixa, fecharCaixa } = useCaixa();
-  const [valor, setValor] = useState(0); 
-  const [carregando, setCarregando] = useState(false);
+export const CaixaModal: React.FC<CaixaModalProps> = ({
+  isOpen,
+  isClosing,
+  onClose
+}) => {
+  const { abrirCaixa, fecharCaixa, caixaSession } = useCaixa();
+  const [valor, setValor] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const valorInicial = isClosing ? (caixaSession?.valor_inicial || 0) : 0;
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setCarregando(true);
-
-    if (valor <= 0 && !isClosing) {
-      alert('O valor de abertura deve ser positivo.');
-      setCarregando(false);
-      return;
+  useEffect(() => {
+    if (isOpen) {
+        setValor('');
+        setLoading(false);
     }
+  }, [isOpen]);
 
-    if (isClosing) {
-      // FECHAMENTO: O valor (valor contado) é passado para a função que o salva no DB.
-      fecharCaixa(valor);
-    } else {
-      // ABERTURA
-      abrirCaixa(valor);
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const valorNum = parseFloat(valor.replace(',', '.'));
+    if (isNaN(valorNum) || valorNum < 0) return;
+
+    setLoading(true);
+    try {
+        if (isClosing) {
+            await fecharCaixa(valorNum);
+        } else {
+            await abrirCaixa(valorNum);
+        }
+        onClose(); // Fecha o modal após sucesso
+    } catch (error) {
+        console.error(error);
+        // O toast de erro já vem do contexto, mas mantemos o modal aberto
+    } finally {
+        setLoading(false);
     }
-
-    setCarregando(false);
-    onClose();
   };
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-gray-900">
-            {isClosing ? 'Fechar Caixa' : 'Abrir Caixa'}
-          </h2>
-          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg" disabled={carregando}>
-            <X size={20} />
-          </button>
-        </div>
+  if (!isOpen) return null;
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {isClosing && caixaSession && (
-            <div className="bg-blue-50 p-4 rounded-lg text-sm text-blue-800">
-              
-              {/* EXIBIÇÃO: Horário de Abertura */}
-              <p className="font-bold">Aberto em: {new Date(caixaSession.data_abertura).toLocaleString('pt-BR')}</p>
-              
-              {/* EXIBIÇÃO: Valor de Abertura */}
-              <p className="font-bold mt-2">Valor de Abertura: R$ {valorInicial.toFixed(2)}</p>
-              
-              {/* Vendas do Dia e Previsto foram removidos para a simplificação. */}
-            </div>
-          )}
+  const config = isClosing ? {
+      title: 'Fechar Caixa',
+      icon: Lock,
+      bgIcon: 'bg-slate-100',
+      color: 'text-slate-600',
+      desc: 'Informe o valor total presente na gaveta para conferência.',
+      btn: 'Confirmar Fechamento',
+      btnColor: 'bg-slate-800 hover:bg-slate-900'
+  } : {
+      title: 'Abrir Caixa',
+      icon: Unlock,
+      bgIcon: 'bg-indigo-100',
+      color: 'text-indigo-600',
+      desc: 'Informe o fundo de troco inicial para começar as vendas.',
+      btn: 'Confirmar Abertura',
+      btnColor: 'bg-indigo-600 hover:bg-indigo-700'
+  };
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {/* Rótulo para o valor a ser salvo no banco */}
-              {isClosing ? 'Valor Contado em Caixa' : 'Valor Inicial de Troco'} (R$)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={valor}
-              onChange={(e) => setValor(parseFloat(e.target.value))}
-              className="w-full p-3 border border-gray-300 rounded-lg text-lg focus:ring-2 focus:ring-secondary"
-              required
-              disabled={carregando}
-            />
-          </div>
+  const Icon = config.icon;
 
-          <button
-            type="submit"
-            className={`w-full py-3 text-white rounded-lg font-medium transition-colors ${
-              isClosing ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
-            }`}
-            disabled={carregando}
-          >
-            {carregando
-              ? 'Processando...'
-              : isClosing
-              ? 'Confirmar Fechamento'
-              : 'Confirmar Abertura'}
-          </button>
-        </form>
-      </div>
+  const footer = (
+    <div className="grid grid-cols-2 gap-3 w-full">
+        <button onClick={onClose} disabled={loading} className="px-4 py-3 border border-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-50">Cancelar</button>
+        <button 
+            onClick={() => handleSubmit()} 
+            disabled={loading}
+            className={`px-4 py-3 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 disabled:opacity-70 ${config.btnColor}`}
+        >
+            <CheckCircle size={18} />
+            {loading ? 'Processando...' : config.btn}
+        </button>
     </div>
+  );
+
+  return (
+    <Modal title="" onClose={onClose} footer={footer} maxWidth="max-w-md">
+        <div className="pt-2 pb-4 text-center px-4">
+             <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${config.bgIcon}`}>
+                <Icon size={32} className={config.color} />
+             </div>
+             <h2 className="text-2xl font-bold text-slate-900 mb-2">{config.title}</h2>
+             <p className="text-slate-500 text-sm mb-6">{config.desc}</p>
+             
+             {isClosing && caixaSession && (
+                <div className="bg-blue-50 p-3 rounded-xl mb-4 text-xs text-blue-800 font-medium">
+                    Aberto em: {new Date(caixaSession.data_abertura).toLocaleTimeString()}
+                </div>
+             )}
+
+             <div className="relative text-left">
+                <label className="block text-xs font-bold text-slate-500 uppercase mb-1 ml-1">Valor (R$)</label>
+                <input 
+                    type="number" 
+                    step="0.01" 
+                    autoFocus
+                    placeholder="0,00"
+                    className="w-full pl-4 pr-4 py-4 text-2xl font-bold text-slate-800 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                    value={valor}
+                    onChange={(e) => setValor(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+                />
+             </div>
+        </div>
+    </Modal>
   );
 };

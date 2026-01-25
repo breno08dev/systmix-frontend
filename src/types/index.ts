@@ -1,9 +1,11 @@
-// src/types/index.ts (VERSÃO COMPLETA E CORRIGIDA)
+// src/types/index.ts
+
 export interface Produto {
   id: string;
   nome: string;
   categoria: string;
   preco: number;
+  estoque: number; // Campo necessário para a lógica de estoque
   ativo: boolean;
   criado_em: string;
 }
@@ -12,19 +14,8 @@ export interface Cliente {
   id: string;
   nome: string;
   telefone?: string;
+  cpf?: string;
   criado_em: string;
-}
-
-export interface Comanda {
-  id: string;
-  numero: number;
-  id_cliente?: string;
-  status: 'aberta' | 'fechada';
-  criado_em: string;
-  fechado_em?: string;
-  cliente?: Cliente;
-  itens?: ItemComanda[];
-  pagamentos?: Pagamento[];
 }
 
 export interface ItemComanda {
@@ -37,6 +28,7 @@ export interface ItemComanda {
   produto?: Produto;
 }
 
+// Tipo completo do banco (para leitura)
 export interface Pagamento {
   id: string;
   id_comanda: string;
@@ -45,34 +37,20 @@ export interface Pagamento {
   data: string;
 }
 
-// Tipo para o Dashboard e Busca Personalizada
-export interface RelatorioVendas {
-  total_vendas: number;
-  total_comandas: number;
-  ticket_medio: number;
-  pagamentos_por_metodo: { metodo_agrupado: string; total: number }[]; // Corrigido
+// NOVO: Tipo simplificado para envio (Corrige o erro de tipagem no Modal)
+export interface PagamentoInput {
+  metodo: string;
+  valor: number;
 }
 
-export interface Caixa {
+export interface Comanda {
   id: string;
-  data_abertura: string;
-  valor_inicial: number;
-  data_fechamento?: string;
-  valor_final?: number;
-}
-
-// Tipos para o Resumo Geral (Hoje, Ontem...)
-export interface ResumoPeriodo {
-  total_vendido: number;
-  cartao: number;
-  pix: number;
-  dinheiro: number;
-  total_pedidos: number;
-}
-
-export interface ResumoDashboard {
-  hoje: ResumoPeriodo;
-  ontem: ResumoPeriodo;
-  ultimos_7_dias: ResumoPeriodo;
-  ultimos_30_dias: ResumoPeriodo;
+  numero: number;
+  id_cliente?: string;
+  status: 'aberta' | 'fechada';
+  criado_em: string;
+  fechado_em?: string;
+  cliente?: Cliente;
+  itens?: ItemComanda[];
+  pagamentos?: Pagamento[];
 }

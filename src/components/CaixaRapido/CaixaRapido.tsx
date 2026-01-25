@@ -1,383 +1,484 @@
-// src/components/CaixaRapido/CaixaRapido.tsx (LÓGICA HÍBRIDA CORRIGIDA)
 import React, { useState, useEffect, useMemo } from 'react';
-import { ShoppingBag, X, Plus, Search } from 'lucide-react';
+import { 
+  ShoppingBag, Search, Trash2, ShoppingCart, 
+  CreditCard, Lock, Unlock, ChevronRight, Plus, Minus, Box 
+} from 'lucide-react';
 import { useCaixa } from '../../contexts/CaixaContext';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { produtosService } from '../../services/produtos';
-import { Produto, ItemComanda } from '../../types';
+import { comandasService } from '../../services/comandas';
+import { Produto } from '../../types';
 import { CaixaModal } from './CaixaModal';
 import { useToast } from '../../contexts/ToastContext';
-import { localDatabaseService } from '../../lib/localDatabase';
-import { comandasService } from '../../services/comandas';
+import Modal from '../Shared/Modal';
 
-const criarVendaRapida = async (isOnline: boolean, produtosNoCarrinho: Produto[], pagamentos: { metodo: string; valor: number }[]) => {
-  if (produtosNoCarrinho.length === 0) return;
+// Interface local para o carrinho
+interface ItemCarrinho {
+  produto: Produto;
+  quantidade: number;
+}
 
-  if (isOnline) {
-    console.log("ONLINE: Registrando Venda Rápida via Supabase...");
-    try {
-      const comanda = await comandasService.criarComanda(isOnline, 0, undefined); 
-      if (!comanda) throw new Error("Não foi possível criar a comanda online.");
-
-      for (const produto of produtosNoCarrinho) {
-        const item: Omit<ItemComanda, 'id' | 'id_comanda' | 'criado_em'> = {
-          id_produto: produto.id,
-          quantidade: 1, 
-          valor_unit: produto.preco,
-        };
-        await comandasService.adicionarItem(isOnline, comanda.id, item);
-      }
-
-      await comandasService.fecharComanda(isOnline, comanda.id, pagamentos);
-      console.log("ONLINE: Venda Rápida registrada com sucesso.");
-      
-    } catch (error) {
-      console.error("ERRO na Venda Rápida ONLINE:", error);
-      throw new Error("Falha ao registrar venda online. Verifique a conexão.");
-    }
-
-  } else {
-    console.log("OFFLINE: Criando comanda no Dexie/SQLite");
-    const comanda = await localDatabaseService.criarComanda(0, undefined); 
-    
-    for (const produto of produtosNoCarrinho) {
-      const item: Omit<ItemComanda, 'id' | 'id_comanda' | 'criado_em'> = {
-        id_produto: produto.id,
-        quantidade: 1, 
-        valor_unit: produto.preco,
-      };
-      console.log("OFFLINE: Adicionando item localmente");
-      const novoItem = await localDatabaseService.adicionarItem(comanda.id, item);
-      
-      await localDatabaseService.addPendingAction('ADICIONAR_ITEM', { idComanda: comanda.id, item: novoItem });
-    }
-
-    console.log("OFFLINE: Fechando comanda localmente");
-    await localDatabaseService.fecharComanda(comanda.id, pagamentos);
-    await localDatabaseService.addPendingAction('FECHAR_COMANDA', { idComanda: comanda.id, pagamentos });
-  }
-};
-
-// CORREÇÃO: Padronização dos métodos com a origem "Cx.Rapido"
-const METODOS_PAGAMENTO_RAPIDO = ['Dinheiro Cx.Rapido', 'Pix Cx.Rapido', 'Cartão Cx.Rapido'];
-
+const METODOS_PAGAMENTO_RAPIDO = ['Dinheiro', 'Pix', 'Cartão Débito', 'Cartão Crédito'];
 
 export const CaixaRapido: React.FC = () => {
   const { isOnline } = useOnlineStatus();
-  const { caixaAberto,  } = useCaixa();
+  const { caixaAberto } = useCaixa(); 
   const { addToast } = useToast();
   
   const [produtos, setProdutos] = useState<Produto[]>([]);
-  const [produtosNoCarrinho, setProdutosNoCarrinho] = useState<Produto[]>([]);
+  const [carrinho, setCarrinho] = useState<ItemCarrinho[]>([]);
+  
   const [modalCaixaAberto, setModalCaixaAberto] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   
   const [termoBusca, setTermoBusca] = useState('');
   const [vendaModalAberto, setVendaModalAberto] = useState(false);
 
-  useEffect(() => {
+  // Carrega produtos (e atualiza estoque visualmente)
+  const carregarProdutos = () => {
     produtosService.listarAtivos(isOnline).then(setProdutos).catch(console.error);
+  };
+
+  useEffect(() => {
+    carregarProdutos();
   }, [isOnline]);
 
-  const totalCarrinho = produtosNoCarrinho.reduce((sum, p) => sum + p.preco, 0);
+  // Totais
+  const totalCarrinho = useMemo(() => {
+    return carrinho.reduce((sum, item) => sum + (item.produto.preco * item.quantidade), 0);
+  }, [carrinho]);
 
   const produtosFiltrados = useMemo(() => {
     if (!termoBusca) return produtos;
     const busca = termoBusca.toLowerCase();
-    return produtos.filter(p => p.nome.toLowerCase().includes(busca));
+    return produtos.filter(p => 
+      p.nome.toLowerCase().includes(busca) || 
+      p.categoria.toLowerCase().includes(busca)
+    );
   }, [produtos, termoBusca]);
 
+  // Adicionar ao Carrinho (Com verificação de estoque)
   const handleAdicionarProduto = (produto: Produto) => {
-    setProdutosNoCarrinho(prev => [...prev, produto]);
+    setCarrinho(prev => {
+      const itemExistente = prev.find(item => item.produto.id === produto.id);
+      const qtdAtual = itemExistente ? itemExistente.quantidade : 0;
+
+      // Validação de Estoque
+      if (qtdAtual + 1 > produto.estoque) {
+          addToast(`Limite de estoque atingido para ${produto.nome}.`, 'error');
+          return prev;
+      }
+
+      if (itemExistente) {
+        // Incrementa quantidade
+        return prev.map(item => 
+          item.produto.id === produto.id 
+            ? { ...item, quantidade: item.quantidade + 1 }
+            : item
+        );
+      }
+      // Novo item
+      return [...prev, { produto, quantidade: 1 }];
+    });
   };
 
-  const handleRemoverProduto = (index: number) => {
-    setProdutosNoCarrinho(prev => prev.filter((_, i) => i !== index));
+  // Alterar Quantidade no Carrinho (+/-)
+  const handleAlterarQuantidade = (index: number, delta: number) => {
+    setCarrinho(prev => {
+      const item = prev[index];
+      const novaQtd = item.quantidade + delta;
+      
+      // Validação de estoque ao aumentar
+      if (delta > 0 && novaQtd > item.produto.estoque) {
+          addToast('Estoque insuficiente.', 'error');
+          return prev;
+      }
+
+      // Remove se chegar a 0
+      if (novaQtd <= 0) {
+        return prev.filter((_, i) => i !== index);
+      }
+      
+      return prev.map((it, i) => i === index ? { ...it, quantidade: novaQtd } : it);
+    });
+  };
+
+  const handleRemoverItem = (index: number) => {
+    setCarrinho(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleAbrirFinalizarVenda = () => {
-    if (produtosNoCarrinho.length === 0) return;
+    if (carrinho.length === 0) return;
     setVendaModalAberto(true);
   };
 
+  // Processar Venda
   const handleFinalizarVendaComPagamento = async (pagamentos: { metodo: string; valor: number }[], troco: number) => {
     try {
-      if (pagamentos.length === 0) {
-        addToast('Selecione pelo menos um método de pagamento.', 'error');
-        return;
+      // 1. Cria Comanda Temporária
+      const comanda = await comandasService.criarComanda(isOnline, 0, undefined); 
+      
+      // 2. Adiciona Itens (O Service deve lidar com a baixa de estoque no banco)
+      for (const item of carrinho) {
+        await comandasService.adicionarItem(isOnline, comanda.id, {
+          id_produto: item.produto.id,
+          quantidade: item.quantidade,
+          valor_unit: item.produto.preco
+        });
       }
 
-      await criarVendaRapida(isOnline, produtosNoCarrinho, pagamentos);
+      // 3. Fecha Comanda
+      await comandasService.fecharComanda(isOnline, comanda.id, pagamentos);
       
-      setProdutosNoCarrinho([]);
+      setCarrinho([]);
       setVendaModalAberto(false);
+      carregarProdutos(); // Atualiza a lista para refletir o novo estoque
       
-      let successMessage = `Venda Rápida de R$ ${totalCarrinho.toFixed(2)} registrada!`;
-      if (troco > 0) {
-        successMessage += ` Troco: R$ ${troco.toFixed(2)}.`;
-      }
-      if (!isOnline) {
-        successMessage += " A venda será sincronizada quando houver conexão.";
-      }
-      
-      addToast(successMessage, 'success');
+      let msg = `Venda finalizada!`;
+      if (troco > 0) msg += ` Troco: R$ ${troco.toFixed(2)}`;
+      addToast(msg, 'success');
 
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      const msg = error instanceof Error ? error.message : 'Erro ao finalizar a venda. Tente novamente.';
-      addToast(msg, 'error');
+      addToast(error.message || 'Erro ao finalizar venda.', 'error');
     }
   };
 
-  const handleAbrirModalCaixa = (closing: boolean) => {
-    setIsClosing(closing);
+  const handleControleCaixa = (fechar: boolean) => {
+    setIsClosing(fechar);
     setModalCaixaAberto(true);
-  };
-  
-  const VendaRapidaModal: React.FC<{
-    total: number;
-    onClose: () => void;
-    onFinalizar: (pagamentos: { metodo: string; valor: number }[], troco: number) => void;
-  }> = ({ total, onClose, onFinalizar }) => {
-    // Usa a lista padronizada para o Caixa Rápido
-    const [pagamentos, setPagamentos] = useState([{ metodo: METODOS_PAGAMENTO_RAPIDO[0], valor: total }]);
-    const [valorRestante, setValorRestante] = useState(0);
-    const [troco, setTroco] = useState(0);
-    const [totalPago, setTotalPago] = useState(total);
-
-    useEffect(() => {
-      const pago = pagamentos.reduce((sum, p) => sum + (p.valor || 0), 0);
-      setTotalPago(pago);
-      const diff = parseFloat((total - pago).toFixed(2));
-
-      if (diff > 0) {
-        setValorRestante(diff);
-        setTroco(0);
-      } else {
-        setValorRestante(0);
-        setTroco(parseFloat((-diff).toFixed(2)));
-      }
-    }, [pagamentos, total]);
-
-    const handleAdicionarPagamento = () => {
-      const valorParaNovoPagamento = valorRestante > 0.01 ? valorRestante : 0;
-      // Usa a lista padronizada
-      setPagamentos(prev => [...prev, { metodo: METODOS_PAGAMENTO_RAPIDO[0], valor: valorParaNovoPagamento }]);
-    };
-    
-    const handleRemoverPagamento = (index: number) => {
-        setPagamentos(prev => prev.filter((_, i) => i !== index));
-    };
-
-    const handleUpdatePagamento = (index: number, key: 'metodo' | 'valor', value: string | number) => {
-      setPagamentos(prev => 
-        prev.map((p, i) => i === index ? { ...p, [key]: (typeof value === 'string' && key === 'valor') ? parseFloat(value) || 0 : value } : p)
-      );
-    };
-
-    const isValido = valorRestante === 0 && pagamentos.length > 0;
-
-    return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
-          <div className="flex justify-between items-center border-b pb-3 mb-4">
-            <h2 className="text-2xl font-bold text-gray-900">Finalizar Venda Rápida</h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
-          </div>
-          
-          <div className="mb-4 p-3 bg-indigo-50 rounded-lg flex justify-between items-center">
-            <span className="text-lg text-indigo-700">Total da Venda:</span>
-            <span className="text-2xl font-bold text-indigo-700">R$ {total.toFixed(2)}</span>
-          </div>
-          
-          <h3 className="text-lg font-semibold mb-3">Pagamentos</h3>
-
-          <div className="space-y-3 max-h-60 overflow-y-auto pr-2">
-            {pagamentos.map((pagamento, index) => (
-              <div key={index} className="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border">
-                <select
-                  value={pagamento.metodo}
-                  onChange={(e) => handleUpdatePagamento(index, 'metodo', e.target.value)}
-                  className="flex-1 p-2 border border-gray-300 rounded-md focus:ring-primary focus:border-primary"
-                >
-                  {/* Usa a lista padronizada */}
-                  {METODOS_PAGAMENTO_RAPIDO.map(metodo => (
-                    <option key={metodo} value={metodo}>{metodo}</option>
-                  ))}
-                </select>
-                <input
-                  type="number"
-                  value={pagamento.valor}
-                  onChange={(e) => handleUpdatePagamento(index, 'valor', e.target.value)}
-                  className="w-28 p-2 border border-gray-300 rounded-md text-right focus:ring-primary focus:border-primary"
-                  step="0.01"
-                  min="0"
-                />
-                <button 
-                    onClick={() => handleRemoverPagamento(index)}
-                    className="text-red-500 hover:text-red-700 p-1"
-                >
-                    <X size={18} />
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <button
-            onClick={handleAdicionarPagamento}
-            className="w-full mt-4 py-2 flex items-center justify-center gap-1 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
-          >
-            <Plus size={18} /> Adicionar Pagamento
-          </button>
-          
-          <div className="mt-4 pt-4 border-t space-y-2">
-            <div className="flex justify-between items-center text-lg font-semibold">
-              <span>Total Pago</span>
-              <span className="text-gray-900">R$ {totalPago.toFixed(2)}</span>
-            </div>
-
-            {valorRestante > 0 && (
-              <div className="flex justify-between items-center text-xl font-bold">
-                <span>Restante a Pagar</span>
-                <span className="text-red-600">
-                  R$ {valorRestante.toFixed(2)}
-                </span>
-              </div>
-            )}
-
-            {troco > 0 && (
-              <div className="flex justify-between items-center text-xl font-bold">
-                <span>Troco</span>
-                <span className="text-green-600">
-                  R$ {troco.toFixed(2)}
-                </span>
-              </div>
-            )}
-          </div>
-          
-          <button
-            onClick={() => onFinalizar(pagamentos, troco)}
-            disabled={!isValido}
-            className="w-full py-3 mt-6 bg-primary text-white rounded-lg hover:bg-secondary disabled:bg-gray-400 disabled:cursor-not-allowed"
-          >
-            Pagar e Finalizar Venda
-          </button>
-        </div>
-      </div>
-    );
   };
 
   return (
-    <div className="p-6">
-      <div className="flex justify-between items-center mb-8">
+    <div className="p-6 h-screen flex flex-col overflow-hidden bg-slate-50/50">
+      
+      {/* HEADER */}
+      <div className="flex justify-between items-center mb-6 shrink-0">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Caixa Rápido</h1>
-          <p className="text-gray-600">Vendas rápidas e gestão de caixa</p>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <ShoppingBag className="text-indigo-600" /> Frente de Caixa
+          </h1>
+          <p className="text-slate-500 text-sm">Vendas rápidas e diretas.</p>
         </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => handleAbrirModalCaixa(false)}
-            disabled={caixaAberto}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400"
-          >
-            Abrir Caixa
-          </button>
-          <button
-            onClick={() => handleAbrirModalCaixa(true)}
-            disabled={!caixaAberto}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-gray-400"
-          >
-            Fechar Caixa
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-6">
-        <div className="col-span-2 bg-white rounded-lg shadow-md p-4 max-h-[80vh] overflow-y-auto">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Cardápio</h2>
-          
-          <div className="mb-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Buscar produto por nome..."
-                value={termoBusca}
-                onChange={(e) => setTermoBusca(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-              />
+        
+        <div className="flex items-center gap-3">
+            <div className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 border text-sm ${
+                caixaAberto 
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
+                : 'bg-amber-50 text-amber-700 border-amber-100'
+            }`}>
+                {caixaAberto ? <Unlock size={16} /> : <Lock size={16} />}
+                {caixaAberto ? 'CAIXA ABERTO' : 'CAIXA FECHADO'}
             </div>
-          </div>
 
-          <div className="grid grid-cols-4 gap-3">
-            {produtosFiltrados.map(produto => (
-              <button
-                key={produto.id}
-                onClick={() => handleAdicionarProduto(produto)}
-                disabled={!caixaAberto}
-                className="flex flex-col items-center justify-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <ShoppingBag size={24} className="text-primary mb-1" />
-                <span className="text-sm font-medium text-gray-800 text-center">{produto.nome}</span>
-                <span className="text-xs text-green-600 mt-1">R$ {produto.preco.toFixed(2)}</span>
-              </button>
-            ))}
-            {produtosFiltrados.length === 0 && (
-                <p className="col-span-4 text-center text-gray-500 py-8">Nenhum produto encontrado.</p>
-            )}
-          </div>
-        </div>
-
-        <div className="col-span-1 bg-white rounded-lg shadow-md flex flex-col max-h-[80vh]">
-          <div className="p-4 border-b">
-            <h2 className="text-xl font-bold text-gray-900">
-              Carrinho ({produtosNoCarrinho.length})
-            </h2>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-2">
-            {produtosNoCarrinho.map((produto, index) => (
-              <div key={`${produto.id}-${index}`} className="flex justify-between items-center text-sm p-2 bg-gray-50 rounded">
-                <span>{produto.nome}</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-green-600">R$ {produto.preco.toFixed(2)}</span>
-                  <button 
-                    onClick={() => handleRemoverProduto(index)} 
-                    className="text-red-500 hover:text-red-700"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              </div>
-            ))}
-            {produtosNoCarrinho.length === 0 && (
-              <p className="text-center text-gray-500 py-8">Adicione produtos</p>
-            )}
-          </div>
-          <div className="p-4 border-t">
-            <div className="flex justify-between items-center text-lg font-bold mb-3">
-              <span>TOTAL</span>
-              <span>R$ {totalCarrinho.toFixed(2)}</span>
-            </div>
             <button
-              onClick={handleAbrirFinalizarVenda}
-              disabled={produtosNoCarrinho.length === 0 || !caixaAberto}
-              className="w-full py-3 bg-primary text-white rounded-lg hover:bg-secondary disabled:bg-gray-400 disabled:cursor-not-allowed"
+                onClick={() => handleControleCaixa(caixaAberto)}
+                className={`px-4 py-2 rounded-xl font-bold text-sm text-white shadow-lg transition-all active:scale-95 ${
+                    caixaAberto 
+                    ? 'bg-slate-800 hover:bg-slate-900 shadow-slate-500/20' 
+                    : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-500/20'
+                }`}
             >
-              Finalizar Venda
+                {caixaAberto ? 'Fechar Caixa' : 'Abrir Caixa'}
             </button>
-          </div>
         </div>
       </div>
 
-      {modalCaixaAberto && <CaixaModal isClosing={isClosing} onClose={() => setModalCaixaAberto(false)} />}
+      <div className="flex-1 flex gap-6 overflow-hidden">
+        
+        {/* ESQUERDA: CATÁLOGO DE PRODUTOS */}
+        <div className="flex-1 flex flex-col bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="p-5 border-b border-slate-100 bg-white z-10">
+             <div className="relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                <input
+                    type="text"
+                    placeholder="Buscar produto por nome ou código..."
+                    className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl text-lg font-medium text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500/20 focus:bg-white transition-all outline-none"
+                    value={termoBusca}
+                    onChange={(e) => setTermoBusca(e.target.value)}
+                    autoFocus
+                />
+             </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5 custom-scrollbar bg-slate-50/30">
+             {produtosFiltrados.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60">
+                    <ShoppingBag size={64} className="mb-4 text-slate-300" />
+                    <p className="text-lg font-medium">Nenhum produto encontrado</p>
+                </div>
+             ) : (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                    {produtosFiltrados.map(produto => {
+                        const semEstoque = produto.estoque <= 0;
+                        return (
+                            <button
+                                key={produto.id}
+                                onClick={() => handleAdicionarProduto(produto)}
+                                disabled={!caixaAberto || semEstoque}
+                                className={`group bg-white p-4 rounded-xl border transition-all flex flex-col justify-between items-start text-left h-[130px] relative overflow-hidden ${
+                                    semEstoque 
+                                    ? 'opacity-60 border-slate-200 cursor-not-allowed grayscale' 
+                                    : 'border-slate-200 hover:border-indigo-400 hover:shadow-lg'
+                                }`}
+                            >
+                                <div className="w-full">
+                                    <h3 className="font-bold text-slate-800 text-base leading-tight line-clamp-2 mb-1">
+                                        {produto.nome}
+                                    </h3>
+                                    
+                                    {/* Badge de Estoque */}
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 ${
+                                            semEstoque ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                            <Box size={10} />
+                                            {produto.estoque} un
+                                        </span>
+                                    </div>
+                                </div>
+                                
+                                <div className="w-full flex items-end justify-between mt-2">
+                                    <p className="text-emerald-600 font-black text-xl">
+                                        R$ {produto.preco.toFixed(2)}
+                                    </p>
+                                    {!semEstoque && (
+                                        <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors shadow-sm">
+                                            <Plus size={18} strokeWidth={3} />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {semEstoque && (
+                                    <div className="absolute inset-0 bg-white/50 flex items-center justify-center">
+                                        <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded shadow-md transform -rotate-12">ESGOTADO</span>
+                                    </div>
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+             )}
+          </div>
+        </div>
+
+        {/* DIREITA: CARRINHO */}
+        <div className="w-[420px] bg-white rounded-3xl border border-slate-200 shadow-xl flex flex-col shrink-0 z-20 overflow-hidden">
+            <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                <div>
+                    <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <ShoppingCart className="text-indigo-600" /> Carrinho
+                    </h2>
+                    <p className="text-slate-500 text-xs mt-0.5">
+                        {carrinho.reduce((acc, item) => acc + item.quantidade, 0)} itens no total
+                    </p>
+                </div>
+                <button 
+                    onClick={() => setCarrinho([])} 
+                    disabled={carrinho.length === 0}
+                    className="text-xs font-bold text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-0"
+                >
+                    LIMPAR
+                </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar bg-slate-50/20">
+                {carrinho.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-300">
+                        <ShoppingBag size={64} className="mb-4 opacity-20" />
+                        <p className="font-medium text-slate-400">Carrinho vazio</p>
+                        <p className="text-sm text-slate-400">Selecione produtos ao lado</p>
+                    </div>
+                ) : (
+                    carrinho.map((item, idx) => (
+                        <div key={`${item.produto.id}-${idx}`} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl hover:border-indigo-200 transition-all shadow-sm">
+                            
+                            <div className="flex-1 truncate pr-3">
+                                <p className="font-bold text-slate-800 text-sm truncate">{item.produto.nome}</p>
+                                <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                                    <span>Unit: R$ {item.produto.preco.toFixed(2)}</span>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1 mr-3">
+                                <button 
+                                    onClick={() => handleAlterarQuantidade(idx, -1)}
+                                    className="w-6 h-6 flex items-center justify-center bg-white text-slate-600 rounded hover:text-red-500 hover:bg-red-50 transition-colors shadow-sm"
+                                >
+                                    <Minus size={14} strokeWidth={2.5} />
+                                </button>
+                                <span className="font-bold text-slate-900 w-6 text-center text-sm">{item.quantidade}</span>
+                                <button 
+                                    onClick={() => handleAlterarQuantidade(idx, 1)}
+                                    className="w-6 h-6 flex items-center justify-center bg-white text-slate-600 rounded hover:text-emerald-600 hover:bg-emerald-50 transition-colors shadow-sm"
+                                >
+                                    <Plus size={14} strokeWidth={2.5} />
+                                </button>
+                            </div>
+
+                            <div className="text-right min-w-[70px] mr-2">
+                                <p className="font-black text-slate-800 text-sm">
+                                    R$ {(item.produto.preco * item.quantidade).toFixed(2)}
+                                </p>
+                            </div>
+
+                            <button 
+                                onClick={() => handleRemoverItem(idx)}
+                                className="text-slate-300 hover:text-red-500 p-1 transition-colors"
+                            >
+                                <Trash2 size={16} />
+                            </button>
+                        </div>
+                    ))
+                )}
+            </div>
+
+            <div className="p-6 bg-slate-900 text-white mt-auto rounded-t-3xl shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.3)] z-30 relative">
+                <div className="flex justify-between items-end mb-4">
+                    <span className="text-slate-400 font-bold text-xs uppercase tracking-wider">Total a Pagar</span>
+                    <span className="text-4xl font-black tracking-tight text-emerald-400">
+                        R$ {totalCarrinho.toFixed(2)}
+                    </span>
+                </div>
+                
+                <button
+                    onClick={handleAbrirFinalizarVenda}
+                    disabled={carrinho.length === 0 || !caixaAberto}
+                    className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black rounded-2xl text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-500/20"
+                >
+                    <span>FINALIZAR VENDA</span>
+                    <ChevronRight size={24} strokeWidth={3} />
+                </button>
+            </div>
+        </div>
+      </div>
+
+      {/* MODAIS */}
+      <CaixaModal 
+        isOpen={modalCaixaAberto}
+        isClosing={isClosing} 
+        onClose={() => setModalCaixaAberto(false)} 
+      />
       
       {vendaModalAberto && (
         <VendaRapidaModal
-          total={totalCarrinho}
-          onClose={() => setVendaModalAberto(false)}
-          onFinalizar={handleFinalizarVendaComPagamento}
+            total={totalCarrinho}
+            onClose={() => setVendaModalAberto(false)}
+            onFinalizar={handleFinalizarVendaComPagamento}
         />
       )}
     </div>
   );
+};
+
+// === SUB-COMPONENTE: MODAL DE PAGAMENTO ===
+const VendaRapidaModal: React.FC<{
+    total: number;
+    onClose: () => void;
+    onFinalizar: (pagamentos: { metodo: string; valor: number }[], troco: number) => void;
+  }> = ({ total, onClose, onFinalizar }) => {
+    
+    const [pagamentos, setPagamentos] = useState([{ metodo: METODOS_PAGAMENTO_RAPIDO[0], valor: total }]);
+    
+    // Recalcula totais
+    const totalPago = pagamentos.reduce((sum, p) => sum + (p.valor || 0), 0);
+    const restante = Math.max(0, parseFloat((total - totalPago).toFixed(2)));
+    const troco = Math.max(0, parseFloat((totalPago - total).toFixed(2)));
+    
+    const handleUpdatePagamento = (index: number, field: 'metodo' | 'valor', value: any) => {
+        const novos = [...pagamentos];
+        novos[index] = { ...novos[index], [field]: value };
+        setPagamentos(novos);
+    };
+
+    const handleAdicionarMetodo = () => {
+        if (restante > 0) {
+            setPagamentos([...pagamentos, { metodo: METODOS_PAGAMENTO_RAPIDO[0], valor: restante }]);
+        }
+    };
+
+    const handleRemoverMetodo = (index: number) => {
+        setPagamentos(pagamentos.filter((_, i) => i !== index));
+    };
+
+    const modalFooter = (
+        <div className="w-full flex gap-3">
+             <button onClick={onClose} className="px-4 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50">Cancelar</button>
+             <button 
+                onClick={() => onFinalizar(pagamentos, troco)}
+                disabled={restante > 0.01}
+                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20"
+             >
+                <CreditCard size={20} />
+                CONFIRMAR E RECEBER
+             </button>
+        </div>
+    );
+
+    return (
+        <Modal title="Pagamento Venda Rápida" onClose={onClose} footer={modalFooter} maxWidth="max-w-lg">
+            <div className="pt-2 pb-6 space-y-6">
+                
+                <div className="flex items-center justify-between p-5 bg-slate-900 text-white rounded-2xl shadow-lg relative overflow-hidden">
+                    <div className="relative z-10">
+                        <span className="text-slate-400 font-bold text-sm uppercase">Total a Receber</span>
+                        <p className="text-4xl font-black text-emerald-400">R$ {total.toFixed(2)}</p>
+                    </div>
+                    <CreditCard size={64} className="absolute right-[-10px] bottom-[-10px] text-slate-800 opacity-50 rotate-12" />
+                </div>
+
+                <div className="space-y-3">
+                    <div className="flex justify-between items-center px-1">
+                        <label className="text-sm font-bold text-slate-700">Formas de Pagamento</label>
+                        {restante > 0 && (
+                            <button onClick={handleAdicionarMetodo} className="text-xs font-bold text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded-md flex items-center gap-1 transition-colors">
+                                <Plus size={14} /> ADICIONAR OUTRO
+                            </button>
+                        )}
+                    </div>
+                    
+                    {pagamentos.map((pag, idx) => (
+                        <div key={idx} className="flex gap-2 items-center animate-[fade-in_0.2s]">
+                            <select 
+                                className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer"
+                                value={pag.metodo}
+                                onChange={(e) => handleUpdatePagamento(idx, 'metodo', e.target.value)}
+                            >
+                                {METODOS_PAGAMENTO_RAPIDO.map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                            
+                            <div className="relative w-36">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-bold">R$</span>
+                                <input 
+                                    type="number" 
+                                    step="0.01"
+                                    className="w-full pl-8 pr-3 py-3 border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                                    value={pag.valor}
+                                    onChange={(e) => handleUpdatePagamento(idx, 'valor', parseFloat(e.target.value) || 0)}
+                                />
+                            </div>
+
+                            {pagamentos.length > 1 && (
+                                <button onClick={() => handleRemoverMetodo(idx)} className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors">
+                                    <Trash2 size={20} />
+                                </button>
+                            )}
+                        </div>
+                    ))}
+                </div>
+
+                <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
+                     <div className="p-4 bg-slate-50 rounded-2xl text-center border border-slate-100">
+                        <p className="text-xs text-slate-500 uppercase font-bold mb-1">Total Pago</p>
+                        <p className="text-2xl font-black text-slate-800">R$ {totalPago.toFixed(2)}</p>
+                     </div>
+                     <div className={`p-4 rounded-2xl text-center border ${restante > 0.01 ? 'bg-red-50 border-red-100 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>
+                        <p className="text-xs uppercase font-bold mb-1">{restante > 0.01 ? 'Falta Pagar' : 'Troco'}</p>
+                        <p className="text-2xl font-black">R$ {(restante > 0.01 ? restante : troco).toFixed(2)}</p>
+                     </div>
+                </div>
+            </div>
+        </Modal>
+    );
 };

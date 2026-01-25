@@ -1,199 +1,108 @@
+// src/components/Produtos/ProdutoModal.tsx
 import React, { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
-import { produtosService } from '../../services/produtos';
+import Modal from '../Shared/Modal';
 import { Produto } from '../../types';
-import { useToast } from '../../contexts/ToastContext'; 
-// 1. NÃO PRECISAMOS MAIS DO 'useSync' AQUI
-// import { useSync } from '../../contexts/SyncContext'; 
+import { produtosService } from '../../services/produtos';
+import { useToast } from '../../contexts/ToastContext';
+import { Package, Tag, Box, Save } from 'lucide-react';
 
 interface ProdutoModalProps {
   produto: Produto | null;
   onClose: () => void;
   onProdutoSalvo: () => void;
-  isOnline: boolean; // 2. O modal RECEBE 'isOnline'
+  isOnline: boolean;
 }
 
 export const ProdutoModal: React.FC<ProdutoModalProps> = ({
   produto,
   onClose,
   onProdutoSalvo,
-  isOnline // 3. A prop é recebida aqui
+  isOnline,
 }) => {
-  const [formData, setFormData] = useState({
-    nome: '',
-    categoria: '',
-    preco: '',
-    ativo: true
-  });
+  const [nome, setNome] = useState('');
+  const [categoria, setCategoria] = useState('');
+  const [preco, setPreco] = useState('');
+  const [estoque, setEstoque] = useState('');
+  const [ativo, setAtivo] = useState(true);
+  const [loading, setLoading] = useState(false);
   
-  const { addToast } = useToast(); 
-  const [carregando, setCarregando] = useState(false);
-  
-  // 4. REMOVIDO: Não precisamos mais do 'addPendingAction'
-  // const { addPendingAction } = useSync(); 
-
-  const categoriasSugeridas = [
-    'Bebidas',
-    'Cervejas',
-    'Vinhos',
-    'Destilados',
-    'Refrigerantes',
-    'Lanches',
-    'Porções',
-    'Pratos Principais',
-    'Sobremesas',
-    'Petiscos'
-  ];
+  const { addToast } = useToast();
 
   useEffect(() => {
     if (produto) {
-      setFormData({
-        nome: produto.nome,
-        categoria: produto.categoria,
-        preco: produto.preco.toString(),
-        ativo: produto.ativo
-      });
+      setNome(produto.nome);
+      setCategoria(produto.categoria);
+      setPreco(produto.preco.toString());
+      setEstoque(produto.estoque ? produto.estoque.toString() : '0');
+      setAtivo(produto.ativo);
+    } else {
+      setNome('');
+      setCategoria('');
+      setPreco('');
+      setEstoque('0');
+      setAtivo(true);
     }
   }, [produto]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCarregando(true);
     
+    if (!nome.trim() || !categoria.trim() || !preco) {
+        addToast('Preencha todos os campos.', 'error'); // CORREÇÃO
+        return;
+    }
+
+    const precoNum = parseFloat(preco.replace(',', '.'));
+    const estoqueNum = parseInt(estoque) || 0;
+
+    if (isNaN(precoNum) || precoNum < 0) {
+        addToast('Preço inválido.', 'error'); // CORREÇÃO
+        return;
+    }
+
+    setLoading(true);
     try {
-      const produtoData = {
-        nome: formData.nome,
-        categoria: formData.categoria,
-        preco: parseFloat(formData.preco),
-        ativo: formData.ativo
+      const dados = { 
+          nome, 
+          categoria, 
+          preco: precoNum, 
+          estoque: estoqueNum, 
+          ativo 
       };
-
-      // 5. CORREÇÃO: Usamos 'isOnline' como primeiro argumento.
-      // O serviço decide se salva online ou offline.
-      if (produto) {
-        await produtosService.atualizar(isOnline, produto.id, produtoData);
-      } else {
-        await produtosService.criar(isOnline, produtoData);
-      }
-
-      addToast(`Produto salvo ${isOnline ? 'com sucesso' : 'localmente'}!`, 'success');
-      onProdutoSalvo();
       
-    } catch (error: any) {
-      console.error('Erro ao salvar produto:', error);
-      addToast(error.message || 'Não foi possível salvar o produto.', 'error');
+      if (produto) {
+          await produtosService.atualizar(isOnline, produto.id, dados);
+          addToast('Produto atualizado!', 'success');
+      } else {
+          await produtosService.criar(isOnline, dados);
+          addToast('Produto criado!', 'success');
+      }
+      
+      onProdutoSalvo();
+    } catch (e: any) {
+      addToast(e.message || 'Erro ao salvar.', 'error');
     } finally {
-      setCarregando(false);
+      setLoading(false);
     }
   };
 
-  const handleChange = (field: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
+  const footer = (
+    <div className="grid grid-cols-2 gap-3 w-full">
+        <button type="button" onClick={onClose} className="px-4 py-3 border rounded-xl hover:bg-slate-50" disabled={loading}>Cancelar</button>
+        <button onClick={handleSubmit} disabled={loading} className="px-4 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 flex items-center justify-center gap-2">{loading ? 'Salvando...' : <><Save size={18}/> Salvar</>}</button>
+    </div>
+  );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-md">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-gray-900">
-            {produto ? 'Editar Produto' : 'Novo Produto'}
-          </h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-lg"
-            disabled={carregando}
-          >
-            <X size={20} />
-          </button>
+    <Modal title={produto ? "Editar" : "Novo"} onClose={onClose} footer={footer} maxWidth="max-w-lg">
+      <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+        <input value={nome} onChange={e => setNome(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="Nome" required />
+        <div className="grid grid-cols-2 gap-4">
+            <input value={categoria} onChange={e => setCategoria(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="Categoria" list="cats" />
+            <input type="number" step="0.01" value={preco} onChange={e => setPreco(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="Preço" required />
         </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Nome do Produto
-            </label>
-            <input
-              type="text"
-              value={formData.nome}
-              onChange={(e) => handleChange('nome', e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
-              required
-              disabled={carregando}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Categoria
-            </label>
-            <input
-              type="text"
-              list="categorias"
-              value={formData.categoria}
-              onChange={(e) => handleChange('categoria', e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
-              required
-              disabled={carregando}
-            />
-            <datalist id="categorias">
-              {categoriasSugeridas.map(categoria => (
-                <option key={categoria} value={categoria} />
-              ))}
-            </datalist>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Preço (R$)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={formData.preco}
-              onChange={(e) => handleChange('preco', e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-secondary focus:border-secondary"
-              required
-              disabled={carregando}
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="ativo"
-              checked={formData.ativo}
-              onChange={(e) => handleChange('ativo', e.target.checked)}
-              className="rounded border-gray-300 focus:ring-secondary"
-              disabled={carregando}
-            />
-            <label htmlFor="ativo" className="text-sm font-medium text-gray-700">
-              Produto ativo
-            </label>
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-              disabled={carregando}
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              className="flex-1 py-2 bg-primary text-white rounded-lg hover:bg-secondary disabled:bg-gray-400"
-              disabled={carregando}
-            >
-              {carregando ? 'Salvando...' : (produto ? 'Salvar' : 'Criar')}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <input type="number" value={estoque} onChange={e => setEstoque(e.target.value)} className="w-full p-3 border rounded-xl" placeholder="Estoque" />
+      </form>
+    </Modal>
   );
 };

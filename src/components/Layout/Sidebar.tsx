@@ -1,4 +1,3 @@
-
 import React from 'react';
 import {
   Home,
@@ -7,7 +6,7 @@ import {
   Users,
   BarChart3,
   LogOut,
-  Wallet // NOVO: Ícone para o caixa
+  Wallet
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -23,36 +22,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Home },
-    { id: 'caixa-rapido', label: 'Caixa Rápido', icon: Wallet }, // NOVO ITEM
+    { id: 'caixa-rapido', label: 'Caixa Rápido', icon: Wallet },
     { id: 'pdv', label: 'Comandas', icon: Receipt },
     { id: 'produtos', label: 'Produtos', icon: Package },
     { id: 'clientes', label: 'Clientes', icon: Users },
     { id: 'relatorios', label: 'Relatórios', icon: BarChart3 },
   ];
   
-  // ... (Resto do código do Sidebar)
-  
   return (
-    <div className="w-64 bg-primary text-white h-screen flex flex-col">
-      <div className="p-6 border-b border-secondary">
-        <h1 className="text-2xl font-bold text-white">Conect New</h1>
+    <aside className="w-72 bg-slate-900 text-white h-screen flex flex-col shadow-2xl z-10 sticky top-0">
+      <div className="p-8 border-b border-slate-800">
+        <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">
+                C
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-white">Conect New</h1>
+        </div>
       </div>
       
-      <nav className="flex-1 p-4">
-        <ul className="space-y-2">
+      <nav className="flex-1 px-4 py-6 overflow-y-auto">
+        <ul className="space-y-1">
           {menuItems.map(item => {
             const Icon = item.icon;
+            const isActive = activeSection === item.id;
             return (
               <li key={item.id}>
                 <button
                   onClick={() => onSectionChange(item.id)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-colors ${
-                    activeSection === item.id
-                      ? 'bg-accent text-white'
-                      : 'text-gray-300 hover:bg-secondary hover:text-white'
+                  className={`group w-full flex items-center gap-3.5 px-4 py-3.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                    isActive
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20 translate-x-1'
+                      : 'text-slate-400 hover:bg-white/5 hover:text-white hover:translate-x-1'
                   }`}
                 >
-                  <Icon size={20} />
+                  <Icon 
+                    size={20} 
+                    className={`transition-colors ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-white'}`} 
+                    strokeWidth={isActive ? 2.5 : 2}
+                  />
                   {item.label}
                 </button>
               </li>
@@ -61,15 +68,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </ul>
       </nav>
       
-      <div className="p-4 border-t border-secondary">
+      <div className="p-4 border-t border-slate-800 mx-2">
         <button
           onClick={onLogout}
-          className="w-full flex items-center gap-3 p-3 text-gray-300 hover:bg-red-600 hover:text-white rounded-lg transition-colors"
+          className="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:bg-red-500/10 hover:text-red-400 rounded-xl transition-all duration-200 group"
         >
-          <LogOut size={20} />
-          Sair
+          <LogOut size={20} className="group-hover:text-red-400" />
+          <span className="font-medium text-sm">Sair do Sistema</span>
         </button>
       </div>
-    </div>
+    </aside>
   );
 };

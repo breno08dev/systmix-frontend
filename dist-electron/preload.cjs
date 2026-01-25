@@ -1,1 +1,25 @@
-"use strict";const{contextBridge:n,ipcRenderer:t}=require("electron");n.exposeInMainWorld("localApi",{getClientes:()=>t.invoke("sqlite:get-clientes"),createCliente:e=>t.invoke("sqlite:create-cliente",e),updateCliente:(e,i)=>t.invoke("sqlite:update-cliente",e,i),deleteCliente:e=>t.invoke("sqlite:delete-cliente",e),getProdutos:()=>t.invoke("sqlite:get-produtos"),createProduto:e=>t.invoke("sqlite:create-produto",e),updateProduto:(e,i)=>t.invoke("sqlite:update-produto",e,i),deleteProduto:e=>t.invoke("sqlite:delete-produto",e),getComandasAbertas:()=>t.invoke("sqlite:get-comandas-abertas"),createComanda:e=>t.invoke("sqlite:create-comanda",e),addItemComanda:e=>t.invoke("sqlite:add-item-comanda",e),updateItemQuantidade:(e,i)=>t.invoke("sqlite:update-item-quantidade",e,i),removeItemComanda:e=>t.invoke("sqlite:remove-item-comanda",e),fecharComanda:(e,i)=>t.invoke("sqlite:fechar-comanda",e,i),getPendingActions:()=>t.invoke("sqlite:get-pending-actions"),addPendingAction:e=>t.invoke("sqlite:add-pending-action",e),deletePendingAction:e=>t.invoke("sqlite:delete-pending-action",e)});
+"use strict";
+const { contextBridge, ipcRenderer } = require("electron");
+contextBridge.exposeInMainWorld("localApi", {
+  // Clientes
+  getClientes: () => ipcRenderer.invoke("sqlite:get-clientes"),
+  createCliente: (cliente) => ipcRenderer.invoke("sqlite:create-cliente", cliente),
+  updateCliente: (id, cliente) => ipcRenderer.invoke("sqlite:update-cliente", id, cliente),
+  deleteCliente: (id) => ipcRenderer.invoke("sqlite:delete-cliente", id),
+  // Produtos
+  getProdutos: () => ipcRenderer.invoke("sqlite:get-produtos"),
+  createProduto: (produto) => ipcRenderer.invoke("sqlite:create-produto", produto),
+  updateProduto: (id, produto) => ipcRenderer.invoke("sqlite:update-produto", id, produto),
+  deleteProduto: (id) => ipcRenderer.invoke("sqlite:delete-produto", id),
+  // Comandas
+  getComandasAbertas: () => ipcRenderer.invoke("sqlite:get-comandas-abertas"),
+  createComanda: (comanda) => ipcRenderer.invoke("sqlite:create-comanda", comanda),
+  addItemComanda: (item) => ipcRenderer.invoke("sqlite:add-item-comanda", item),
+  updateItemQuantidade: (idItem, quantidade) => ipcRenderer.invoke("sqlite:update-item-quantidade", idItem, quantidade),
+  removeItemComanda: (idItem) => ipcRenderer.invoke("sqlite:remove-item-comanda", idItem),
+  fecharComanda: (idComanda, pagamentos) => ipcRenderer.invoke("sqlite:fechar-comanda", idComanda, pagamentos),
+  // Fila de Sincronização
+  getPendingActions: () => ipcRenderer.invoke("sqlite:get-pending-actions"),
+  addPendingAction: (action) => ipcRenderer.invoke("sqlite:add-pending-action", action),
+  deletePendingAction: (id) => ipcRenderer.invoke("sqlite:delete-pending-action", id)
+});

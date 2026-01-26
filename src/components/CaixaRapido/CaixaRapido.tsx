@@ -1,3 +1,4 @@
+// src/components/CaixaRapido/CaixaRapido.tsx
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ShoppingCart, Search, Trash2, CreditCard, Banknote, QrCode, CheckCircle, Package, Lock, Unlock, Loader2 } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
@@ -18,12 +19,10 @@ export const CaixaRapido: React.FC = () => {
   const [termoBusca, setTermoBusca] = useState('');
   const [loading, setLoading] = useState(true);
   
-  // Estado de Pagamento
   const [valorRecebido, setValorRecebido] = useState('');
   const [metodoPagamento, setMetodoPagamento] = useState('DINHEIRO');
   const [processandoVenda, setProcessandoVenda] = useState(false);
 
-  // Controle do Caixa
   const { caixaAberto, registrarVenda } = useCaixa();
   const [modalCaixaOpen, setModalCaixaOpen] = useState(false);
   const [tipoModalCaixa, setTipoModalCaixa] = useState<'abertura' | 'fechamento'>('abertura');
@@ -54,7 +53,7 @@ export const CaixaRapido: React.FC = () => {
   };
 
   const produtosFiltrados = useMemo(() => {
-    if (!termoBusca) return produtos; // Mostra todos se não tiver busca (ou limite se preferir)
+    if (!termoBusca) return produtos; 
     const termo = termoBusca.toLowerCase();
     return produtos.filter(p => 
         p.nome.toLowerCase().includes(termo) || 
@@ -62,7 +61,6 @@ export const CaixaRapido: React.FC = () => {
     );
   }, [produtos, termoBusca]);
 
-  // --- LÓGICA DE ESTOQUE NO CARRINHO ---
   const adicionarAoCarrinho = (produto: Produto) => {
     if (produto.estoque <= 0) {
         addToast('Produto esgotado!', 'error');
@@ -86,7 +84,6 @@ export const CaixaRapido: React.FC = () => {
         return [...prev, { ...produto, quantidadeCarrinho: 1 }];
     });
     setTermoBusca('');
-    // Mantém o foco no input para agilidade
     inputBuscaRef.current?.focus();
   };
 
@@ -103,7 +100,6 @@ export const CaixaRapido: React.FC = () => {
     return pago > totalVenda ? pago - totalVenda : 0;
   }, [valorRecebido, totalVenda]);
 
-  // --- FINALIZAÇÃO DA VENDA ---
   const handleFinalizarVenda = async () => {
     if (carrinho.length === 0) return addToast('Carrinho vazio.', 'error');
     if (!caixaAberto) return addToast('Caixa fechado.', 'error');
@@ -115,7 +111,10 @@ export const CaixaRapido: React.FC = () => {
 
     setProcessandoVenda(true);
     try {
-        const comanda = await comandasService.criarComanda(isOnline, 0, undefined);
+        // GERA NUMERO ALEATÓRIO PARA NÃO TRAVAR COM CHAVE DUPLICADA
+        const numeroVenda = Math.floor(Math.random() * 90000) + 10000;
+
+        const comanda = await comandasService.criarComanda(isOnline, numeroVenda, undefined);
         
         for (const item of carrinho) {
             await comandasService.adicionarItem(isOnline, comanda.id, {
@@ -183,11 +182,8 @@ export const CaixaRapido: React.FC = () => {
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-30px)] gap-4 p-4 max-w-[1920px] mx-auto overflow-hidden">
-      
       {/* ESQUERDA: PRODUTOS */}
       <div className="lg:w-2/3 flex flex-col gap-4 h-full">
-        
-        {/* Header e Busca */}
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 shrink-0">
             <div className="flex justify-between items-center mb-4">
                 <div>
@@ -226,14 +222,12 @@ export const CaixaRapido: React.FC = () => {
             </div>
         </div>
 
-        {/* Grade de Produtos (COM SCROLL E VISUAL AJUSTADO) */}
         <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 p-4 overflow-hidden flex flex-col">
             <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2 px-1 shrink-0">
                 <Package size={18} />
                 {termoBusca ? 'Resultados da Busca' : 'Catálogo de Produtos'}
             </h3>
             
-            {/* Scroll Container */}
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 content-start pb-4">
                     {(termoBusca ? produtosFiltrados : produtos).map(produto => (
@@ -249,7 +243,6 @@ export const CaixaRapido: React.FC = () => {
                                 }
                             `}
                         >
-                            {/* Topo do Card: Nome e Categoria */}
                             <div className="w-full">
                                 <span className="font-bold text-slate-800 text-sm line-clamp-2 leading-tight mb-1">
                                     {produto.nome}
@@ -259,7 +252,6 @@ export const CaixaRapido: React.FC = () => {
                                 </span>
                             </div>
 
-                            {/* Rodapé do Card: Preço e Estoque (ALINHADO NO FUNDO) */}
                             <div className="flex justify-between items-end w-full mt-auto pt-2 border-t border-slate-50">
                                 <span className="font-black text-emerald-600 text-lg">
                                     R$ {produto.preco.toFixed(2)}
@@ -271,7 +263,6 @@ export const CaixaRapido: React.FC = () => {
                                 </span>
                             </div>
                             
-                            {/* Efeito Ripple */}
                             <div className="absolute inset-0 bg-indigo-500/5 opacity-0 group-active:opacity-100 transition-opacity pointer-events-none" />
                         </button>
                     ))}
@@ -289,8 +280,6 @@ export const CaixaRapido: React.FC = () => {
 
       {/* DIREITA: CUPOM / PAGAMENTO */}
       <div className="lg:w-1/3 flex flex-col bg-slate-900 rounded-2xl shadow-2xl overflow-hidden text-white h-full border border-slate-800">
-        
-        {/* Cabeçalho do Cupom */}
         <div className="p-5 bg-slate-800/50 border-b border-slate-700 flex justify-between items-center shrink-0">
             <span className="font-bold text-slate-300 text-sm uppercase tracking-wider">Cupom de Venda</span>
             <span className="bg-emerald-500/20 text-emerald-400 text-xs font-bold px-2 py-1 rounded">
@@ -298,7 +287,6 @@ export const CaixaRapido: React.FC = () => {
             </span>
         </div>
 
-        {/* Lista de Itens (Scrollavel) */}
         <div className="flex-1 p-4 overflow-y-auto custom-scrollbar-dark space-y-2">
             {carrinho.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-50">
@@ -333,7 +321,6 @@ export const CaixaRapido: React.FC = () => {
             )}
         </div>
 
-        {/* Área de Totais e Pagamento (Fixa no fundo) */}
         <div className="bg-slate-800 p-5 border-t border-slate-700 shrink-0">
             <div className="space-y-1 mb-5">
                 <div className="flex justify-between text-slate-400 text-xs">

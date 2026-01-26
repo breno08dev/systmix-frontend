@@ -78,7 +78,7 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({ isOpen, onClose, tipo })
       <div className="space-y-4">
         {!isAbertura && (
             <div className="p-3 bg-slate-100 rounded-lg flex justify-between items-center text-sm">
-                <span className="text-slate-500">Saldo em Sistema:</span>
+                <span className="text-slate-500">Abertura de Caixa:</span>
                 <span className="font-bold text-slate-800">R$ {saldoSistema.toFixed(2)}</span>
             </div>
         )}

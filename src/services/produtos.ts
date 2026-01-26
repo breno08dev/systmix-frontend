@@ -1,71 +1,85 @@
 // src/services/produtos.ts
 import { supabase } from '../lib/supabaseClient';
 import { Produto } from '../types';
+import { db, localDatabaseService } from '../lib/localDatabase';
 
 export const produtosService = {
   
   async listarAtivos(isOnline: boolean): Promise<Produto[]> {
-    if (!isOnline) return [];
-    try {
-      // Removemos 'descricao' da busca se ela não existe, ou deixamos * que pega tudo que tem
-      const { data, error } = await supabase
-        .from('produtos')
-        .select('*, categoria:categorias(*)')
-        .eq('ativo', true)
-        .order('nome', { ascending: true });
+    if (isOnline) {
+      try {
+        // 1. Busca do Supabase
+        const { data, error } = await supabase
+          .from('produtos')
+          .select('*, categoria:categorias(*)')
+          .eq('ativo', true)
+          .order('nome', { ascending: true });
 
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      console.warn("Erro ao buscar com categorias, tentando busca simples...");
-      const { data } = await supabase.from('produtos').select('*').eq('ativo', true);
-      return data || [];
+        if (error) throw error;
+        
+        const produtos = data || [];
+
+        // 2. CACHE: Salva/Atualiza tudo no banco local para usar offline depois
+        if (produtos.length > 0) {
+            // Removemos a categoria aninhada para salvar no banco plano, se necessário, 
+            // ou salvamos direto se o Dexie suportar objetos complexos (suporta).
+            await db.produtos.bulkPut(produtos);
+            console.log(`CACHE: ${produtos.length} produtos atualizados.`);
+        }
+
+        return produtos;
+      } catch (error) {
+        console.error("Erro ao buscar online, tentando local...", error);
+        return await localDatabaseService.listarProdutosAtivos();
+      }
+    } else {
+      // MODO OFFLINE: Busca do Dexie
+      console.log("OFFLINE: Buscando produtos locais...");
+      return await localDatabaseService.listarProdutosAtivos();
     }
   },
 
   async criar(isOnline: boolean, produto: any): Promise<Produto> {
-    if (!isOnline) throw new Error("Offline");
-
-    // PAYLOAD LIMPO: Sem o campo 'descricao'
     const payload = {
         nome: produto.nome.trim(),
-        preco: typeof produto.preco === 'string' 
-          ? parseFloat(produto.preco.replace(',', '.')) 
-          : produto.preco,
+        preco: typeof produto.preco === 'string' ? parseFloat(produto.preco.replace(',', '.')) : produto.preco,
         estoque: Number(produto.estoque),
-        // Envia NULL se estiver vazio ou string vazia
         id_categoria: (produto.id_categoria && produto.id_categoria !== "") ? produto.id_categoria : null,
         ativo: true
     };
 
-    const { data, error } = await supabase.from('produtos').insert([payload]).select().single();
-
-    if (error) {
-        console.error("Erro Supabase:", error);
-        throw new Error(error.message);
+    if (isOnline) {
+        const { data, error } = await supabase.from('produtos').insert([payload]).select().single();
+        if (error) throw error;
+        
+        // Atualiza cache local
+        await db.produtos.put(data);
+        return data;
+    } else {
+        // Cria offline e agenda sync
+        const novoProduto = await localDatabaseService.criarProduto(payload);
+        await localDatabaseService.addPendingAction('CRIAR_PRODUTO', { produto: payload });
+        return novoProduto;
     }
-    return data;
   },
 
   async atualizar(isOnline: boolean, id: string, produto: any): Promise<void> {
-    if (!isOnline) throw new Error("Offline");
-
-    // PAYLOAD LIMPO: Sem o campo 'descricao'
     const payload = {
         nome: produto.nome.trim(),
-        preco: typeof produto.preco === 'string' 
-          ? parseFloat(produto.preco.replace(',', '.')) 
-          : produto.preco,
+        preco: typeof produto.preco === 'string' ? parseFloat(produto.preco.replace(',', '.')) : produto.preco,
         estoque: Number(produto.estoque),
         id_categoria: (produto.id_categoria && produto.id_categoria !== "") ? produto.id_categoria : null,
         ativo: true
     };
 
-    const { error } = await supabase.from('produtos').update(payload).eq('id', id);
-
-    if (error) {
-        console.error("Erro Supabase Update:", error);
-        throw new Error(error.message);
+    if (isOnline) {
+        const { error } = await supabase.from('produtos').update(payload).eq('id', id);
+        if (error) throw error;
+        // Atualiza local
+        await db.produtos.update(id, payload);
+    } else {
+        await localDatabaseService.atualizarProduto(id, payload);
+        await localDatabaseService.addPendingAction('ATUALIZAR_PRODUTO', { id, produto: payload });
     }
   }
 };

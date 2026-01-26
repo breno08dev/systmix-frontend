@@ -57,3 +57,12 @@ export interface PagamentoInput {
     metodo: string;
     valor: number;
 }
+export interface Caixa {
+  id: string;
+  aberto: boolean;
+  saldo_inicial: number; // Espera "saldo_inicial"
+  saldo_atual: number;   // Espera "saldo_atual"
+  aberto_em: string;     // Espera "aberto_em"
+  fechado_em?: string;   // Espera "fechado_em"
+  operador?: string;
+}

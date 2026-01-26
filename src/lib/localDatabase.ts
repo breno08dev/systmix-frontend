@@ -1,10 +1,27 @@
 // src/lib/localDatabase.ts
 import Dexie, { Table } from 'dexie';
-import { Comanda, ItemComanda, Produto, Cliente, Pagamento } from '../types';
+// Importamos os tipos existentes. Note que PagamentoInput existe, mas Pagamento não.
+import { Comanda, ItemComanda, Produto, Cliente, PagamentoInput } from '../types';
 
-// 1. DEFINIÇÃO DA "FILA DE SINCRONIZAÇÃO"
+// -------------------------------------------------------------------------
+// 1. TIPOS LOCAIS (Para não alterar o src/types/index.ts)
+// -------------------------------------------------------------------------
+
+// Definimos Pagamento localmente estendendo o Input (metodo/valor)
+export interface Pagamento extends PagamentoInput {
+  id: string;
+  id_comanda: string;
+  data: string;
+}
+
+// Estendemos a Comanda original para incluir a lista de pagamentos no banco local
+export interface ComandaLocal extends Comanda {
+  pagamentos: Pagamento[];
+}
+
+// Definição da Fila de Sincronização
 export type PendingAction = {
-  id?: number; // O Dexie vai autoincrementar
+  id?: number; // Autoincrementado pelo Dexie
   type: 
     | 'CRIAR_COMANDA' 
     | 'ADICIONAR_ITEM' 
@@ -16,62 +33,103 @@ export type PendingAction = {
     | 'DELETAR_CLIENTE'
     | 'CRIAR_PRODUTO'
     | 'ATUALIZAR_PRODUTO'
-    | 'DELETAR_PRODUTO';
+    | 'DELETAR_PRODUTO'
+    | 'MOVIMENTACAO_CAIXA';
+
   payload: any;
   criado_em: number;
 };
 
-// 2. DEFINIÇÃO DO BANCO DE DADOS LOCAL
-// Usamos chaves primárias 'string' (id) para espelhar o Supabase (UUID)
-// e IDs temporários (ex: 'local_12345') para dados criados offline.
+// -------------------------------------------------------------------------
+// 2. BANCO DE DADOS LOCAL (DEXIE)
+// -------------------------------------------------------------------------
+
 export class LocalDatabase extends Dexie {
-  comandas!: Table<Comanda, string>;
+  // Usamos ComandaLocal aqui para garantir que o campo 'pagamentos' exista
+  comandas!: Table<ComandaLocal, string>; 
   itensComanda!: Table<ItemComanda, string>;
   produtos!: Table<Produto, string>;
   clientes!: Table<Cliente, string>;
   pagamentos!: Table<Pagamento, string>;
-  pending_actions!: Table<PendingAction, number>; // Chave numérica autoincrementada
+  pending_actions!: Table<PendingAction, number>;
 
   constructor() {
     super('SystMixDatabase');
     this.version(1).stores({
-      comandas: 'id, numero, status', // Chave primária 'id' (string)
+      comandas: 'id, numero, status', 
       itensComanda: 'id, id_comanda, id_produto',
-      produtos: 'id, nome, categoria, ativo',
+      produtos: 'id, nome, ativo', // Ajustado conforme seu types/index.ts
       clientes: 'id, nome, telefone',
       pagamentos: 'id, id_comanda',
-      pending_actions: '++id, criado_em' // Chave 'id' (number) autoincrementada
+      pending_actions: '++id, criado_em' 
     });
   }
 }
 
-// 3. INSTÂNCIA GLOBAL DO BANCO LOCAL
 export const db = new LocalDatabase();
 
-// 4. HELPER PARA CRIAR ID LOCAL
-const createLocalId = () => `local_${Date.now()}`;
+// Helper para gerar ID temporário
+const createLocalId = () => `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-// 5. O SERVIÇO QUE O RESTO DO APP VAI USAR
+// -------------------------------------------------------------------------
+// 3. SERVIÇO (Lógica de Negócio Offline)
+// -------------------------------------------------------------------------
+
 export const localDatabaseService = {
   
-  // --- Funções de Comanda ---
-  async listarAbertas(): Promise<Comanda[]> {
-    console.log('OFFLINE: Buscando comandas do Dexie/SQLite');
+  // --- GERENCIAMENTO DA FILA (PENDING ACTIONS) ---
+  
+  async addPendingAction(type: PendingAction['type'], payload: any): Promise<void> {
+    const newAction: Omit<PendingAction, 'id'> = { 
+      type, 
+      payload, 
+      criado_em: Date.now() 
+    };
+    await db.pending_actions.add(newAction as PendingAction);
+    console.log(`OFFLINE: Ação agendada [${type}]`, payload);
+  },
+
+  async getPendingActions(): Promise<PendingAction[]> {
+    const actions = await db.pending_actions.toArray();
+    return actions.sort((a, b) => a.criado_em - b.criado_em);
+  },
+  
+  async removePendingAction(id: number): Promise<void> {
+    if (!id) return;
+    await db.pending_actions.delete(id);
+  },
+
+  // --- COMANDAS ---
+
+  async listarAbertas(): Promise<ComandaLocal[]> {
+    // Busca apenas as abertas
     const comandasLocais = await db.comandas.where('status').equals('aberta').toArray();
     
+    // Preenche os relacionamentos manualmente (Join manual)
     for (const comanda of comandasLocais) {
       comanda.itens = await db.itensComanda.where('id_comanda').equals(comanda.id).toArray();
+      
+      // Busca dados do produto para exibir nome/preço na lista
+      if (comanda.itens) {
+        for (const item of comanda.itens) {
+            const produtoRel = await db.produtos.get(item.id_produto);
+            if (produtoRel) item.produto = produtoRel;
+        }
+      }
+
       if (comanda.id_cliente) {
         comanda.cliente = await db.clientes.get(comanda.id_cliente);
       }
+      
+      // Carrega pagamentos vinculados
+      comanda.pagamentos = await db.pagamentos.where('id_comanda').equals(comanda.id).toArray();
     }
     return comandasLocais;
   },
 
-  async criarComanda(numero: number, idCliente?: string): Promise<Comanda> {
-    console.log('OFFLINE: Criando comanda no Dexie/SQLite');
+  async criarComanda(numero: number, idCliente?: string): Promise<ComandaLocal> {
     const idLocal = createLocalId();
-    const novaComanda: Comanda = {
+    const novaComanda: ComandaLocal = {
       id: idLocal,
       numero,
       id_cliente: idCliente,
@@ -80,12 +138,20 @@ export const localDatabaseService = {
       itens: [],
       pagamentos: []
     };
+    
     await db.comandas.add(novaComanda); 
+
+    // IMPORTANTE: Envia 'idTemp' no payload para o Sync saber mapear depois
+    await this.addPendingAction('CRIAR_COMANDA', { 
+      numero, 
+      id_cliente: idCliente, 
+      idTemp: idLocal 
+    });
+
     return novaComanda;
   },
 
   async adicionarItem(idComanda: string, item: Omit<ItemComanda, 'id' | 'id_comanda' | 'criado_em'>): Promise<ItemComanda> {
-    console.log('OFFLINE: Adicionando item localmente');
     const idLocal = createLocalId();
     const novoItem: ItemComanda = {
       ...item,
@@ -93,39 +159,84 @@ export const localDatabaseService = {
       id_comanda: idComanda,
       criado_em: new Date().toISOString()
     };
+    
     await db.itensComanda.add(novoItem);
+
+    // Agenda Sync
+    await this.addPendingAction('ADICIONAR_ITEM', { 
+        ...novoItem,
+        id_comanda: idComanda 
+    });
+
     return novoItem;
   },
 
-  async fecharComanda(idComanda: string, pagamentos: Omit<Pagamento, 'id' | 'data' | 'id_comanda'>[]): Promise<void> {
-    console.log('OFFLINE: Fechando comanda localmente');
+  async fecharComanda(idComanda: string, pagamentosInput: PagamentoInput[]): Promise<void> {
+    // 1. Atualiza status da comanda
     await db.comandas.update(idComanda, { status: 'fechada', fechado_em: new Date().toISOString() });
-    for (const pag of pagamentos) {
+    
+    // 2. Registra pagamentos localmente com ID e Data
+    const pagamentosCompletos: Pagamento[] = [];
+    
+    for (const pag of pagamentosInput) {
       const idLocal = createLocalId();
-      await db.pagamentos.add({
-        ...pag,
+      const novoPagamento: Pagamento = {
         id: idLocal,
         id_comanda: idComanda,
+        metodo: pag.metodo,
+        valor: pag.valor,
         data: new Date().toISOString()
-      });
+      };
+      
+      await db.pagamentos.add(novoPagamento);
+      pagamentosCompletos.push(novoPagamento);
     }
+
+    // 3. Agenda Sync enviando APENAS o necessário (PagamentoInput)
+    // O backend geralmente espera [{metodo, valor}, ...]
+    await this.addPendingAction('FECHAR_COMANDA', { 
+      id_comanda: idComanda, 
+      pagamentos: pagamentosInput // Enviamos o input limpo
+    });
   },
 
   async atualizarQuantidadeItem(idItem: string, novaQuantidade: number): Promise<void> {
+    const item = await db.itensComanda.get(idItem);
+    if (!item) return;
+
     await db.itensComanda.update(idItem, { quantidade: novaQuantidade });
+
+    await this.addPendingAction('ATUALIZAR_QTD_ITEM', {
+      id_comanda: item.id_comanda,
+      id_item: idItem,
+      quantidade: novaQuantidade
+    });
   },
 
   async removerItem(idItem: string): Promise<void> {
+    const item = await db.itensComanda.get(idItem);
+    if (!item) return;
+
     await db.itensComanda.delete(idItem);
+
+    await this.addPendingAction('REMOVER_ITEM', {
+      id_comanda: item.id_comanda,
+      id_item: idItem
+    });
   },
 
-  // --- Funções de Produto ---
+  // --- PRODUTOS ---
+
   async listarProdutos(): Promise<Produto[]> {
     return db.produtos.toArray();
   },
+  
   async listarProdutosAtivos(): Promise<Produto[]> {
-    return db.produtos.where('ativo').equals(1).toArray(); // 'true' é 1 no index do Dexie
+    // Nota: Se 'ativo' for boolean no TS, o Dexie pode armazenar como 0/1 ou true/false dependendo do adapter.
+    // Se tiver problemas, tente .filter(p => p.ativo)
+    return db.produtos.filter(p => p.ativo === true).toArray();
   },
+
   async criarProduto(produto: Omit<Produto, 'id' | 'criado_em'>): Promise<Produto> {
     const idLocal = createLocalId();
     const novoProduto: Produto = {
@@ -133,20 +244,27 @@ export const localDatabaseService = {
       id: idLocal,
       criado_em: new Date().toISOString()
     };
+    
     await db.produtos.add(novoProduto);
+    await this.addPendingAction('CRIAR_PRODUTO', { produto: novoProduto });
+
     return novoProduto;
   },
-  async atualizarProduto(id: string, produto: Partial<Produto>): Promise<void> {
-    await db.produtos.update(id, produto);
+
+  async atualizarProduto(id: string, dados: Partial<Produto>): Promise<void> {
+    await db.produtos.update(id, dados);
   },
+
   async deletarProduto(id: string): Promise<void> {
     await db.produtos.delete(id);
   },
 
-  // --- Funções de Cliente ---
+  // --- CLIENTES ---
+
   async listarClientes(): Promise<Cliente[]> {
     return db.clientes.toArray();
   },
+
   async criarCliente(cliente: Omit<Cliente, 'id' | 'criado_em'>): Promise<Cliente> {
     const idLocal = createLocalId();
     const novoCliente: Cliente = {
@@ -154,36 +272,18 @@ export const localDatabaseService = {
       id: idLocal,
       criado_em: new Date().toISOString()
     };
+    
     await db.clientes.add(novoCliente);
+    await this.addPendingAction('CRIAR_CLIENTE', { cliente: novoCliente });
+
     return novoCliente;
   },
-  async atualizarCliente(id: string, cliente: Partial<Cliente>): Promise<void> {
-    await db.clientes.update(id, cliente);
+
+  async atualizarCliente(id: string, dados: Partial<Cliente>): Promise<void> {
+    await db.clientes.update(id, dados);
   },
+
   async deletarCliente(id: string): Promise<void> {
     await db.clientes.delete(id);
-  },
-
-  // --- FUNÇÕES DE SINCRONIZAÇÃO (Onde estava seu erro) ---
-
-  async addPendingAction(type: PendingAction['type'], payload: any): Promise<void> {
-    const newAction: Omit<PendingAction, 'id'> = { type, payload, criado_em: Date.now() };
-    await db.pending_actions.add(newAction as PendingAction);
-    console.log('OFFLINE: Ação pendente adicionada:', newAction);
-  },
-
-  async getPendingActions(): Promise<PendingAction[]> {
-    console.log('SYNC: Buscando ações pendentes...');
-    const actions = await db.pending_actions.toArray();
-    
-    // ✅ CORREÇÃO APLICADA (erro da imagem image_35eff1.png)
-    // Adicionamos os tipos (a: PendingAction, b: PendingAction)
-    return actions.sort((a: PendingAction, b: PendingAction) => a.criado_em - b.criado_em);
-  },
-  
-  async removePendingAction(id: number): Promise<void> {
-    if (!id) return;
-    await db.pending_actions.delete(id);
-    console.log('SYNC: Ação removida da fila:', id);
   }
 };

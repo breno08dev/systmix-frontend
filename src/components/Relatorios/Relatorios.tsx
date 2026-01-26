@@ -1,324 +1,250 @@
-// src/components/Relatorios/Relatorios.tsx (CORRIGIDO E SEGURO)
-import React, { useEffect, useState } from 'react';
-import { Loader, DollarSign, ShoppingCart, Users, X, } from 'lucide-react';
-import { relatoriosService } from '../../services/relatorios';
-import { ResumoDashboard, ResumoPeriodo, RelatorioVendas } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { 
+  BarChart3, 
+  Calendar, 
+  Wallet, 
+  CreditCard, 
+  QrCode, 
+  Banknote, 
+  TrendingUp, 
+  ArrowUpRight,
+  Loader2,
+  RefreshCcw,
+  History,
+  CalendarDays,
+  CalendarRange
+} from 'lucide-react';
+import { relatoriosService, ResumoFinanceiro } from '../../services/relatorios';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { useToast } from '../../contexts/ToastContext';
 
-// --- Funções Auxiliares de Data (Novas/Corrigidas) ---
-
-/**
- * Converte a string YYYY-MM-DD (do input date) para o início do dia (00:00:00)
- * no fuso horário local e depois em ISO string para o Supabase.
- */
-const formatarDataInicio = (dateString: string): string => {
-  // Cria um objeto Date com base no fuso horário local (00:00:00)
-  const date = new Date(`${dateString}T00:00:00`); 
-  // Retorna a string ISO (ex: 2025-11-19T03:00:00.000Z se estiver no Brasil)
-  return date.toISOString(); 
+// Estado inicial zerado para reuso
+const resumoZerado: ResumoFinanceiro = {
+  totalGeral: 0, totalDinheiro: 0, totalPix: 0, totalCartao: 0, qtdVendas: 0, ticketMedio: 0
 };
-
-/**
- * Converte a string YYYY-MM-DD (do input date) para o final do dia (23:59:59)
- * no fuso horário local e depois em ISO string para o Supabase.
- */
-const formatarDataFim = (dateString: string): string => {
-  // Cria um objeto Date com base no fuso horário local (23:59:59)
-  const date = new Date(`${dateString}T23:59:59`);
-  // Retorna a string ISO
-  return date.toISOString();
-};
-// --- FIM das Funções Auxiliares de Data ---
-
-
-// --- Card de Resumo (Para "Hoje", "Ontem", etc.) ---
-interface ResumoCardProps {
-  titulo: string;
-  dados: ResumoPeriodo;
-}
-
-const ResumoCard: React.FC<ResumoCardProps> = ({ titulo, dados }) => {
-  const dadosValidos = dados || { 
-    total_vendido: 0, 
-    cartao: 0, 
-    pix: 0, 
-    dinheiro: 0, 
-    total_pedidos: 0 
-  };
-
-  return (
-    <div className="bg-white rounded-lg shadow-md p-5">
-      <h2 className="text-lg font-bold text-gray-800 mb-4">{titulo}</h2>
-      <div className="space-y-3">
-        <div className="flex justify-between items-center pb-3 border-b border-gray-100">
-          <span className="text-sm font-semibold text-primary">Total Vendido</span>
-          <span className="text-lg font-bold text-primary">
-            R$ {dadosValidos.total_vendido.toFixed(2)}
-          </span>
-        </div>
-        <div className="flex justify-between items-center">
-          <span className="text-sm text-gray-500">Cartão</span>
-          <span className="text-sm font-medium text-gray-700">
-            R$ {dadosValidos.cartao.toFixed(2)}
-          </span>
-        </div>
-        <div className="flex justify-between items-center">
-          <span className="text-sm text-gray-500">PIX</span>
-          <span className="text-sm font-medium text-gray-700">
-            R$ {dadosValidos.pix.toFixed(2)}
-          </span>
-        </div>
-        <div className="flex justify-between items-center">
-          <span className="text-sm text-gray-500">Dinheiro</span>
-          <span className="text-sm font-medium text-gray-700">
-            R$ {dadosValidos.dinheiro.toFixed(2)}
-          </span>
-        </div>
-        <div className="flex justify-between items-center pt-3 border-t border-gray-100">
-          <span className="text-sm font-semibold text-gray-800">Total de Pedidos</span>
-          <span className="text-lg font-bold text-gray-800">
-            {dadosValidos.total_pedidos}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-
-// --- Card de Stats (Para a busca customizada) ---
-interface StatsCardProps {
-  title: string;
-  value: string;
-  icon: React.ReactNode;
-}
-const StatsCard: React.FC<StatsCardProps> = ({ title, value, icon }) => (
-  <div className="bg-white rounded-lg shadow-md p-5 flex items-start space-x-4">
-    <div className="bg-primary text-white rounded-full p-3">{icon}</div>
-    <div>
-      <p className="text-sm font-medium text-gray-500">{title}</p>
-      <p className="text-2xl font-bold text-gray-900">{value}</p>
-    </div>
-  </div>
-);
-
 
 export const Relatorios: React.FC = () => {
+  const [loading, setLoading] = useState(true);
+  const [dataFiltro, setDataFiltro] = useState(new Date().toISOString().split('T')[0]); // Hoje YYYY-MM-DD
+  
+  // Estados para os diferentes períodos
+  const [resumoDia, setResumoDia] = useState<ResumoFinanceiro>(resumoZerado);
+  const [resumoOntem, setResumoOntem] = useState<ResumoFinanceiro>(resumoZerado);
+  const [resumoSemana, setResumoSemana] = useState<ResumoFinanceiro>(resumoZerado);
+  const [resumoMes, setResumoMes] = useState<ResumoFinanceiro>(resumoZerado);
+
   const { isOnline } = useOnlineStatus();
-  
-  // Estados dos relatórios
-  const [resumo, setResumo] = useState<ResumoDashboard | null>(null);
-  const [relatorioCustom, setRelatorioCustom] = useState<RelatorioVendas | null>(null);
+  const { addToast } = useToast();
 
-  // Estados de controle
-  const [loadingResumo, setLoadingResumo] = useState(true);
-  const [loadingCustom, setLoadingCustom] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Estados dos filtros de data (mantidos como YYYY-MM-DD para o input type="date")
-  const [dataInicio, setDataInicio] = useState(new Date().toISOString().split('T')[0]);
-  const [dataFim, setDataFim] = useState(new Date().toISOString().split('T')[0]);
-
-  // Carrega o resumo ("Hoje", "Ontem"...) na primeira vez
   useEffect(() => {
-    if (isOnline) {
-      setLoadingResumo(true);
-      setError(null);
-      relatoriosService.obterResumoGeral()
-        .then(setResumo)
-        .catch(err => {
-          console.error(err);
-          setError(err.message || 'Erro ao buscar resumos.');
-        })
-        .finally(() => setLoadingResumo(false));
-    } else {
-      setLoadingResumo(false);
-      setError("Relatórios indisponíveis offline.");
-    }
-  }, [isOnline]);
+    carregarDados();
+  }, [dataFiltro, isOnline]);
 
-  // Função para a busca por data específica
-  const handleGerarRelatorioCustom = () => {
-    if (!isOnline) {
-      setError("Busca indisponível offline.");
-      return;
-    }
-    
-    // VERIFICAÇÃO ADICIONAL: Se dataInicio > dataFim
-    if (new Date(dataInicio).getTime() > new Date(dataFim).getTime()) {
-        setError("A Data Início não pode ser maior que a Data Fim.");
-        return;
-    }
-
-    setLoadingCustom(true);
-    setError(null);
-    setRelatorioCustom(null); 
-    
-    // *******************************************************************
-    // ** A CORREÇÃO CRÍTICA É AQUI: ENVIAR COM HORA INICIAL E FINAL **
-    // *******************************************************************
-    const dataInicioFormatada = formatarDataInicio(dataInicio);
-    const dataFimFormatada = formatarDataFim(dataFim);
-
-    relatoriosService.obterVendasPorPeriodo(dataInicioFormatada, dataFimFormatada)
-      .then(setRelatorioCustom) 
-      .catch(err => {
-        console.error(err);
-        setError(err.message || "Erro ao gerar relatório customizado.");
-      })
-      .finally(() => setLoadingCustom(false));
-  };
-  
-  // Função para limpar a busca e voltar ao resumo padrão
-  const handleLimparBusca = () => {
-    setRelatorioCustom(null);
-    setError(null);
-  };
-
-  // Define qual view mostrar: o resumo ou a busca customizada
-  const mostrarResumoPadrao = !relatorioCustom;
-  
-  const formatarData = (dataStr: string) => {
+  const carregarDados = async () => {
+    setLoading(true);
     try {
-      const [ano, mes, dia] = dataStr.split('-');
-      return `${dia}/${mes}/${ano}`;
-    } catch (e) { return dataStr; }
+      // 1. Definição das datas
+      const hoje = dataFiltro;
+      
+      const ontemObj = new Date(); 
+      ontemObj.setDate(ontemObj.getDate() - 1);
+      const ontem = ontemObj.toISOString().split('T')[0];
+
+      const semanaObj = new Date(); 
+      semanaObj.setDate(semanaObj.getDate() - 7);
+      const semanaInicio = semanaObj.toISOString().split('T')[0];
+
+      const now = new Date();
+      const mesInicio = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const mesFim = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+      // 2. Busca tudo em paralelo para ser rápido
+      const [dadosHoje, dadosOntem, dadosSemana, dadosMes] = await Promise.all([
+        relatoriosService.buscarResumoFinanceiro(isOnline, hoje, hoje),
+        relatoriosService.buscarResumoFinanceiro(isOnline, ontem, ontem),
+        relatoriosService.buscarResumoFinanceiro(isOnline, semanaInicio, hoje),
+        relatoriosService.buscarResumoFinanceiro(isOnline, mesInicio, mesFim)
+      ]);
+
+      setResumoDia(dadosHoje);
+      setResumoOntem(dadosOntem);
+      setResumoSemana(dadosSemana);
+      setResumoMes(dadosMes);
+
+    } catch (error) {
+      console.error(error);
+      addToast('Erro ao calcular relatórios.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const BRL = (valor: number) => 
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
 
   return (
-    <div className="p-6">
-      <h1 className="text-3xl font-bold text-gray-900 mb-8">Relatórios</h1>
+    <div className="p-6 max-w-[1920px] mx-auto min-h-screen flex flex-col gap-8">
+      
+      {/* CABEÇALHO E FILTROS */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-800 tracking-tight flex items-center gap-3">
+            <BarChart3 className="text-indigo-600" size={32} />
+            Relatório Financeiro
+          </h1>
+          <p className="text-slate-500 mt-1">Visão completa do faturamento e métricas.</p>
+        </div>
 
-      {/* SELETOR DE DATAS (Sempre visível) */}
-      <div className="bg-white rounded-lg shadow-md p-5 mb-8">
-        <h3 className="text-lg font-bold text-gray-800 mb-4">Buscar por Período Específico</h3>
-        <div className="flex flex-wrap items-center gap-4">
-          <div className="flex-1 min-w-[200px]">
-            <label htmlFor="dataInicio" className="block text-sm font-medium text-gray-700 mb-1">Data Início</label>
-            <input
-              type="date"
-              id="dataInicio"
-              value={dataInicio}
-              onChange={e => setDataInicio(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-primary"
-            />
+        <div className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center gap-2 px-3 text-slate-500 border-r border-slate-200">
+             <Calendar size={18} />
+             <span className="text-sm font-semibold">Data Base:</span>
           </div>
-          <div className="flex-1 min-w-[200px]">
-            <label htmlFor="dataFim" className="block text-sm font-medium text-gray-700 mb-1">Data Fim</label>
-            <input
-              type="date"
-              id="dataFim"
-              value={dataFim}
-              onChange={e => setDataFim(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-primary"
-            />
-          </div>
-          <button
-            onClick={handleGerarRelatorioCustom}
-            disabled={loadingCustom || !isOnline}
-            className="flex-shrink-0 self-end px-6 py-2 bg-primary text-white rounded-lg hover:bg-secondary disabled:bg-gray-400"
+          <input 
+            type="date" 
+            value={dataFiltro}
+            onChange={(e) => setDataFiltro(e.target.value)}
+            className="outline-none text-slate-700 font-medium bg-transparent"
+          />
+          <button 
+            onClick={carregarDados}
+            className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"
+            title="Atualizar agora"
           >
-            {loadingCustom ? "Buscando..." : "Buscar"}
+            <RefreshCcw size={18} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
-      {/* ÁREA DE RESULTADO */}
-      <div id="relatorio-conteudo">
-        
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-6" role="alert">
-            <strong className="font-bold">Erro: </strong>
-            <span className="block sm:inline">{error}</span>
+      {loading ? (
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[400px]">
+            <Loader2 size={48} className="text-indigo-600 animate-spin mb-4" />
+            <p className="text-slate-400 font-medium">Consolidando vendas...</p>
+        </div>
+      ) : (
+        <>
+          {/* 1. HERO CARD - FATURAMENTO DO DIA */}
+          <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-3xl p-8 text-white shadow-xl shadow-indigo-500/20 relative overflow-hidden">
+             <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                <div>
+                    <p className="text-indigo-100 font-medium mb-1 flex items-center gap-2">
+                        <TrendingUp size={20} /> Faturamento Selecionado
+                    </p>
+                    <h2 className="text-5xl font-black tracking-tight mb-2">
+                        {BRL(resumoDia.totalGeral)}
+                    </h2>
+                    <div className="flex gap-4 text-sm text-indigo-200">
+                        <span className="bg-white/10 px-3 py-1 rounded-full backdrop-blur-sm">
+                            {resumoDia.qtdVendas} Vendas
+                        </span>
+                        <span className="bg-white/10 px-3 py-1 rounded-full backdrop-blur-sm">
+                            Ticket Médio: {BRL(resumoDia.ticketMedio)}
+                        </span>
+                    </div>
+                </div>
+                <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md">
+                    <Wallet size={32} className="text-white" />
+                </div>
+             </div>
+             
+             {/* Decoração Fundo */}
+             <div className="absolute -right-10 -bottom-20 w-64 h-64 bg-white/10 rounded-full blur-3xl pointer-events-none"></div>
+             <div className="absolute -left-10 -top-20 w-64 h-64 bg-indigo-500/30 rounded-full blur-3xl pointer-events-none"></div>
           </div>
-        )}
 
-        {/* --- MODO: BUSCA CUSTOMIZADA --- */}
-        {loadingCustom && (
-           <div className="flex justify-center items-center h-64">
-             <Loader className="animate-spin text-primary" size={48} />
-           </div>
-        )}
-        
-        {relatorioCustom && !loadingCustom && (
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">Resultado da Busca</h2>
-                <p className="text-gray-600">
-                  Período de {formatarData(dataInicio)} a {formatarData(dataFim)}
-                </p>
-              </div>
-              <button 
-                onClick={handleLimparBusca}
-                className="flex items-center gap-1 text-sm text-red-500 hover:text-red-700"
-              >
-                <X size={16} /> Limpar Busca
-              </button>
-            </div>
+          {/* 2. DETALHAMENTO POR MÉTODO (SEM PORCENTAGEM) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-8 mt-8">
-              <StatsCard title="Total de Vendas" value={`R$ ${relatorioCustom.total_vendas.toFixed(2)}`} icon={<DollarSign />} />
-              <StatsCard title="Total de Comandas" value={relatorioCustom.total_comandas.toString()} icon={<ShoppingCart />} />
-              <StatsCard title="Ticket Médio" value={`R$ ${relatorioCustom.ticket_medio.toFixed(2)}`} icon={<Users />} />
+            {/* Dinheiro */}
+            <div className="bg-white p-6 rounded-2xl border border-emerald-100 shadow-lg shadow-emerald-500/5 hover:border-emerald-200 transition-all flex items-center justify-between">
+                <div>
+                    <p className="text-slate-500 font-medium text-sm mb-1">Dinheiro</p>
+                    <h3 className="text-3xl font-bold text-slate-800">{BRL(resumoDia.totalDinheiro)}</h3>
+                </div>
+                <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+                    <Banknote size={24} />
+                </div>
             </div>
-            
-            <h3 className="text-xl font-bold text-gray-900 mb-4">
-              Detalhes por Método de Pagamento
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Método</th>
-                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Valor Total</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {relatorioCustom.pagamentos_por_metodo.map((metodo: any) => (
-                    <tr key={metodo.metodo}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{metodo.metodo}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600 text-right">R$ {metodo.total.toFixed(2)}</td>
-                    </tr>
-                  ))}
-                  {relatorioCustom.pagamentos_por_metodo.length === 0 && (
-                    <tr><td colSpan={2} className="px-6 py-4 text-center text-gray-500">Nenhum pagamento neste período.</td></tr>
-                  )}
-                </tbody>
-                <tfoot className="bg-gray-50">
-                  <tr>
-                    <td className="px-6 py-3 text-left text-sm font-bold text-gray-900 uppercase">Total Geral</td>
-                    <td className="px-6 py-3 text-right text-sm font-bold text-gray-900">R$ {relatorioCustom.total_vendas.toFixed(2)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-        )}
 
-        {/* --- MODO: RESUMO PADRÃO --- */}
-        {mostrarResumoPadrao && !loadingCustom && (
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Resumo Geral</h2>
-            {loadingResumo && (
-              <div className="flex justify-center items-center h-64">
-                <Loader className="animate-spin text-primary" size={48} />
-              </div>
-            )}
-            
-            {/* Cards empilhados (layout de 1 coluna) */}
-            {!loadingResumo && resumo && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 gap-5">
-                <ResumoCard titulo="Vendas Hoje" dados={resumo.hoje} />
-                <ResumoCard titulo="Vendas Ontem" dados={resumo.ontem} />
-                <ResumoCard titulo="Vendas nos Últimos 7 Dias" dados={resumo.ultimos_7_dias} />
-                <ResumoCard titulo="Vendas nos Últimos 30 Dias" dados={resumo.ultimos_30_dias} />
-              </div>
-            )}
+            {/* PIX */}
+            <div className="bg-white p-6 rounded-2xl border border-cyan-100 shadow-lg shadow-cyan-500/5 hover:border-cyan-200 transition-all flex items-center justify-between">
+                <div>
+                    <p className="text-slate-500 font-medium text-sm mb-1">PIX</p>
+                    <h3 className="text-3xl font-bold text-slate-800">{BRL(resumoDia.totalPix)}</h3>
+                </div>
+                <div className="w-12 h-12 bg-cyan-50 rounded-xl flex items-center justify-center text-cyan-600">
+                    <QrCode size={24} />
+                </div>
+            </div>
+
+            {/* Cartão */}
+            <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-lg shadow-purple-500/5 hover:border-purple-200 transition-all flex items-center justify-between">
+                <div>
+                    <p className="text-slate-500 font-medium text-sm mb-1">Cartão</p>
+                    <h3 className="text-3xl font-bold text-slate-800">{BRL(resumoDia.totalCartao)}</h3>
+                </div>
+                <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center text-purple-600">
+                    <CreditCard size={24} />
+                </div>
+            </div>
           </div>
-        )}
-        
-      </div>
+
+          {/* 3. HISTÓRICO E COMPARATIVOS (NOVA SEÇÃO) */}
+          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mt-4">
+            <History className="text-indigo-600" />
+            Histórico de Vendas
+          </h2>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            
+            {/* Ontem */}
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="p-3 bg-white rounded-lg shadow-sm text-slate-600">
+                        <CalendarDays size={20} />
+                    </div>
+                    <span className="text-xs font-bold bg-slate-200 text-slate-600 px-2 py-1 rounded">24h</span>
+                </div>
+                <div>
+                    <p className="text-slate-500 font-medium text-sm">Vendas de Ontem</p>
+                    <h3 className="text-2xl font-bold text-slate-800 mt-1">{BRL(resumoOntem.totalGeral)}</h3>
+                    <p className="text-xs text-slate-400 mt-2">{resumoOntem.qtdVendas} vendas realizadas</p>
+                </div>
+            </div>
+
+            {/* Últimos 7 Dias */}
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="p-3 bg-white rounded-lg shadow-sm text-indigo-600">
+                        <CalendarRange size={20} />
+                    </div>
+                    <span className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-1 rounded">7 Dias</span>
+                </div>
+                <div>
+                    <p className="text-slate-500 font-medium text-sm">Últimos 7 Dias</p>
+                    <h3 className="text-2xl font-bold text-slate-800 mt-1">{BRL(resumoSemana.totalGeral)}</h3>
+                    <p className="text-xs text-slate-400 mt-2">Média diária: {BRL(resumoSemana.totalGeral / 7)}</p>
+                </div>
+            </div>
+
+            {/* Mês Atual */}
+            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 flex flex-col justify-between">
+                <div className="flex justify-between items-start mb-4">
+                    <div className="p-3 bg-white rounded-lg shadow-sm text-emerald-600">
+                        <Calendar size={20} />
+                    </div>
+                    <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded">Mensal</span>
+                </div>
+                <div>
+                    <p className="text-slate-500 font-medium text-sm">Vendas do Mês</p>
+                    <h3 className="text-2xl font-bold text-slate-800 mt-1">{BRL(resumoMes.totalGeral)}</h3>
+                    <p className="text-xs text-slate-400 mt-2">{resumoMes.qtdVendas} vendas este mês</p>
+                </div>
+            </div>
+
+          </div>
+        </>
+      )}
     </div>
   );
 };

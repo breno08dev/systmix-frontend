@@ -1,10 +1,10 @@
 // src/components/PDV/AbrirComandaModal.tsx
 import React, { useState, useMemo } from 'react';
-import Modal from '../Shared/Modal'; // Usando o componente compartilhado
+import Modal from '../Shared/Modal';
 import { Cliente } from '../../types';
 import { clientesService } from '../../services/clientes';
 import { useToast } from '../../contexts/ToastContext';
-import { UserPlus, Search, CheckCircle, Loader2, User } from 'lucide-react';
+import { UserPlus, Search, CheckCircle, Loader2 } from 'lucide-react';
 
 interface AbrirComandaModalProps {
   numeroComanda: number;
@@ -30,13 +30,12 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
   
   const { addToast } = useToast(); 
 
-  // Filtro otimizado
   const clientesFiltrados = useMemo(() => {
     if (!buscaCliente) return clientes.slice(0, 10);
     const termo = buscaCliente.toLowerCase();
     return clientes.filter(c => 
       c.nome.toLowerCase().includes(termo) ||
-      c.telefone?.includes(termo)
+      (c.telefone && c.telefone.includes(termo))
     );
   }, [clientes, buscaCliente]);
 
@@ -52,18 +51,18 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
           return;
         }
         
+        // Cria e recebe o objeto cliente completo
         const novoCliente = await clientesService.criar(isOnline, {
           nome: novoClienteNome,
           telefone: novoClienteTelefone || undefined,
         });
         
+        // Casting se necessário conforme seu tipo
         clienteParaPassar = novoCliente as Cliente; 
       }
       
-      // Chama a função do pai (PDV)
+      // Chama a função do pai com todos os dados
       onComandaAberta(numeroComanda, clienteParaPassar?.id, clienteParaPassar);
-      // O fechamento do modal geralmente é feito pelo pai após sucesso, mas podemos forçar aqui se necessário
-      // onClose(); 
       
     } catch (error: any) {
       console.error("Erro ao processar:", error);
@@ -73,7 +72,6 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
     }
   };
 
-  // Footer customizado
   const modalFooter = (
     <>
       <button
@@ -113,8 +111,6 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
       maxWidth="max-w-md"
     >
       <div className="space-y-5">
-        
-        {/* Toggle Mode */}
         {!modoNovoCliente ? (
           <div className="space-y-4 animate-[fade-in_0.2s]">
             <div className="relative">
@@ -134,7 +130,6 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
               </div>
             </div>
 
-            {/* Lista de Resultados */}
             <div className="max-h-48 overflow-y-auto border border-slate-100 rounded-xl bg-slate-50 p-1">
               {clientesFiltrados.length === 0 ? (
                   <p className="text-center text-slate-400 py-4 text-sm">Nenhum cliente encontrado.</p>
@@ -170,7 +165,6 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
             </div>
           </div>
         ) : (
-          /* MODO CADASTRO */
           <div className="space-y-4 animate-[fade-in_0.2s]">
             <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100 mb-4 flex items-start gap-3">
                 <div className="p-2 bg-white rounded-full text-indigo-600 shadow-sm">

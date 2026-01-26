@@ -10,6 +10,14 @@ interface ComprovanteProps {
 export const Comprovante = React.forwardRef<HTMLDivElement, ComprovanteProps>((props, ref) => {
   const { comanda, taxaServico } = props;
   
+  // Função para formatar moeda corretamente (R$ 0,00)
+  const f = (valor: number) => {
+    return valor.toLocaleString('pt-BR', { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    });
+  };
+
   // Cálculo local seguro baseado nos itens reais
   const subtotal = comanda.itens?.reduce((acc, item) => acc + (item.quantidade * item.valor_unit), 0) || 0;
   const valorTaxa = taxaServico ? subtotal * 0.10 : 0;
@@ -18,7 +26,7 @@ export const Comprovante = React.forwardRef<HTMLDivElement, ComprovanteProps>((p
   return (
     <div ref={ref} className="p-4 font-mono text-xs text-black bg-white">
       <div className="text-center mb-4">
-        <h1 className="text-base font-bold">Systmix - Sistema de Bares</h1>
+        <h1 className="text-base font-bold">Ce Ta Doido Dos Homins</h1>
         <p>Comprovante de Consumo - Não Fiscal</p>
       </div>
       
@@ -44,7 +52,7 @@ export const Comprovante = React.forwardRef<HTMLDivElement, ComprovanteProps>((p
               <td className="text-left py-0.5">{item.produto?.nome}</td>
               <td className="text-center py-0.5">{item.quantidade}</td>
               <td className="text-right py-0.5">
-                {(item.quantidade * item.valor_unit).toFixed(2).replace('.', ',')}
+                {f(item.quantidade * item.valor_unit)}
               </td>
             </tr>
           ))}
@@ -58,18 +66,18 @@ export const Comprovante = React.forwardRef<HTMLDivElement, ComprovanteProps>((p
           <>
              <div className="flex justify-between text-xs">
                 <span>Subtotal:</span>
-                <span>R$ {subtotal.toFixed(2).replace('.', ',')}</span>
+                <span>R$ {f(subtotal)}</span>
             </div>
             <div className="flex justify-between text-xs">
                 <span>Serviço (10%):</span>
-                <span>R$ {valorTaxa.toFixed(2).replace('.', ',')}</span>
+                <span>R$ {f(valorTaxa)}</span>
             </div>
           </>
         )}
         
         <div className="flex justify-between font-bold text-sm mt-1">
             <span>TOTAL A PAGAR:</span>
-            <span>R$ {totalFinal.toFixed(2).replace('.', ',')}</span>
+            <span>R$ {f(totalFinal)}</span>
         </div>
       </div>
       

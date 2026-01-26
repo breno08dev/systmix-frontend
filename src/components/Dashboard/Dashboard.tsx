@@ -10,7 +10,7 @@ import { useSync } from '../../contexts/SyncContext';
 import { useToast } from '../../contexts/ToastContext';
 import { useCaixa } from '../../contexts/CaixaContext';
 
-// CORREÇÃO: Aceita 'any' para evitar erro de tipo se vier null/Date/string
+// Função segura para formatar horário
 const formatTimeSafe = (dateValue: any) => {
   if (!dateValue) return '--:--';
   try {
@@ -35,51 +35,61 @@ export const Dashboard: React.FC = () => {
   const { isOnline } = useOnlineStatus();
   const { isSyncing } = useSync();
   const { addToast } = useToast();
-  const { caixaAberto, caixaSession } = useCaixa(); 
+  
+  // Usa apenas caixaAberto
+  const { caixaAberto } = useCaixa(); 
 
   useEffect(() => {
     carregarDados();
   }, [isOnline, isSyncing, caixaAberto]); 
 
   const carregarDados = async () => {
-    if (!caixaAberto || !caixaSession) {
+    // 1. Verificação de segurança: Se não tem caixaAberto ou ele não tem data de abertura, zera e sai.
+    if (!caixaAberto || !caixaAberto.aberto_em) {
       setStats({ comandasAbertas: 0, totalProdutos: 0, totalClientes: 0, faturamentoDia: 0 });
       setComandasRecentes([]);
       return; 
     }
 
     try {
-      // MANTIDA LÓGICA ORIGINAL EXATA
-      const dataInicio = caixaSession.data_abertura;
-      const dataFim = new Date().toISOString(); 
+      // 2. CORREÇÃO CRÍTICA DE DATA:
+      // O serviço espera 'YYYY-MM-DD'. O banco retorna ISO completo 'YYYY-MM-DDTHH:mm:ss...'
+      // Pegamos apenas os 10 primeiros caracteres para evitar "Invalid time value" no serviço.
+      const dataInicioStr = String(caixaAberto.aberto_em).substring(0, 10);
+      const dataFimStr = new Date().toISOString().substring(0, 10);
 
-      const [comandas, produtos, clientes, relatorioHoje] = await Promise.all([
+      const [comandas, produtos, clientes, financeiro] = await Promise.all([
         comandasService.listarAbertas(isOnline),
-        produtosService.listar(isOnline),
+        produtosService.listarAtivos(isOnline),
         clientesService.listar(isOnline),
-        isOnline ? relatoriosService.obterVendasPorPeriodo(dataInicio, dataFim) : Promise.resolve(null)
+        // Passamos as strings limpas para o serviço
+        isOnline ? relatoriosService.buscarResumoFinanceiro(isOnline, dataInicioStr, dataFimStr) : Promise.resolve(null)
       ]);
       
       setStats({
         comandasAbertas: comandas.length,
-        totalProdutos: produtos.filter(p => p.ativo).length,
+        totalProdutos: produtos.length,
         totalClientes: clientes.length,
-        faturamentoDia: relatorioHoje?.total_vendas || 0
+        faturamentoDia: financeiro?.totalGeral || 0
       });
 
-      // Ordenação mantendo a lógica de data
-      const comandasOrdenadas = comandas.sort((a, b) => 
-        new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime()
-      );
+      const comandasOrdenadas = comandas.sort((a, b) => {
+        const dateA = new Date(a.criado_em || 0).getTime();
+        const dateB = new Date(b.criado_em || 0).getTime();
+        return dateB - dateA;
+      });
+      
       setComandasRecentes(comandasOrdenadas.slice(0, 5));
 
     } catch (error: any) {
       console.error('Erro ao carregar dados do dashboard:', error);
-      addToast(error.message || 'Erro ao carregar dashboard', 'error');
+      // Evita spammar toast se for erro de conexão momentânea
+      if (error.message !== 'Offline') {
+         addToast('Erro ao atualizar dashboard', 'error');
+      }
     }
   };
 
-  // Componente de Card Atualizado
   const StatCard: React.FC<{
     title: string;
     value: string | number;
@@ -159,11 +169,11 @@ export const Dashboard: React.FC = () => {
         />
         <StatCard 
           title="Faturamento Hoje" 
-          value={faturamentoVisivel ? `R$ ${(stats.faturamentoDia || 0).toFixed(2)}` : 'R$ ••••'} 
+          value={faturamentoVisivel ? `R$ ${(stats.faturamentoDia || 0).toFixed(2).replace('.', ',')}` : 'R$ ••••'} 
           icon={TrendingUp} 
           color="text-indigo-600" 
           bg="bg-indigo-50" 
-          isVisibilityToggleable={isOnline && caixaAberto}
+          isVisibilityToggleable={isOnline && !!caixaAberto}
           onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}
         />
       </div>
@@ -213,7 +223,7 @@ export const Dashboard: React.FC = () => {
                   <div className="text-right pl-4">
                     <p className="text-sm text-slate-400 mb-0.5">Total</p>
                     <p className="text-lg font-black text-emerald-600">
-                      R$ {(comanda.itens?.reduce((total, item) => total + (item.quantidade * item.valor_unit), 0) || 0).toFixed(2)}
+                      R$ {(comanda.itens?.reduce((total, item) => total + (item.quantidade * item.valor_unit), 0) || 0).toFixed(2).replace('.', ',')}
                     </p>
                   </div>
                 </div>

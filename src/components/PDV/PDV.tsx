@@ -11,7 +11,6 @@ import { useToast } from '../../contexts/ToastContext';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useSync } from '../../contexts/SyncContext';
 
-// Helper de formatação de hora seguro
 const formatTimeSafe = (dateString: string) => {
   try {
     const date = new Date(dateString);
@@ -31,7 +30,6 @@ export const PDV: React.FC = () => {
   const [comandaSelecionada, setComandaSelecionada] = useState<Comanda | null>(null);
   const [numeroParaAbrir, setNumeroParaAbrir] = useState<number | null>(null);
   
-  // Filtro simples para os números das comandas (opcional, para UX futura)
   const [filtroNumero, setFiltroNumero] = useState('');
 
   const { addToast } = useToast();
@@ -76,14 +74,16 @@ export const PDV: React.FC = () => {
       addToast(`Comanda ${numero} aberta com sucesso!`, 'success');
       setNumeroParaAbrir(null);
       
-      if (novaComanda) {
-        const comandaComCliente = { ...novaComanda, cliente: clientObject };
-        // @ts-ignore
-        setComandasAbertas(prev => [...prev, comandaComCliente]);
-        setComandaSelecionada(comandaComCliente);
-      } else {
-        carregarDados(); 
-      }
+      const comandaComCliente = { 
+        ...novaComanda, 
+        cliente: clientObject || novaComanda.cliente 
+      };
+      
+      // Abre o modal diretamente
+      setComandaSelecionada(comandaComCliente);
+      
+      // Atualiza lista em background
+      carregarDados(); 
     } catch (error: any) {
       addToast(error.message || 'Erro ao abrir comanda.', 'error');
     }
@@ -91,14 +91,13 @@ export const PDV: React.FC = () => {
 
   const handleFecharModal = (idComandaFechada?: string) => {
     setComandaSelecionada(null);
-    if (idComandaFechada) {
-        setComandasAbertas(prev => prev.filter(c => c.id !== idComandaFechada));
-        carregarDados(); 
-    }
+    // ATENÇÃO: Recarrega sempre para garantir que os totais e status na lista estejam corretos
+    carregarDados();
   };
   
   const handleItemAtualizado = () => {
-      carregarDados(); 
+     // Função opcional, pois o carregarDados no close já resolve.
+     // Se quiser atualizar a lista em tempo real enquanto o modal está aberto, chame carregarDados() aqui.
   };
   
   const calcularTotalComanda = (comanda: Comanda) => {
@@ -118,9 +117,7 @@ export const PDV: React.FC = () => {
         </div>
         
         <div className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 border transition-colors ${
-            isOnline 
-            ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
-            : 'bg-amber-50 text-amber-700 border-amber-100'
+            isOnline ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100'
         }`}>
             {isOnline ? <Wifi size={16} /> : <WifiOff size={16} />}
             {isOnline ? 'Sistema Online' : 'Modo Offline Ativo'}
@@ -139,7 +136,7 @@ export const PDV: React.FC = () => {
             </h2>
         </div>
 
-        {carregando ? (
+        {carregando && comandasAbertas.length === 0 ? (
             <div className="h-40 flex items-center justify-center bg-white rounded-2xl border border-slate-100 border-dashed">
                 <p className="text-slate-400 animate-pulse">Carregando comandas...</p>
             </div>

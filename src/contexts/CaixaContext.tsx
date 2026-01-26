@@ -1,182 +1,181 @@
 // src/contexts/CaixaContext.tsx
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { Caixa, MovimentacaoCaixa } from '../types';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase } from '../lib/supabaseClient';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
+import { useAuth } from '../auth/AuthContext'; // Importar Auth para pegar o usuário
 import { useToast } from './ToastContext';
-import { supabaseCaixaService } from '../services/supabaseService';
-import { useOnlineStatus } from '../hooks/useOnlineStatus'; 
 
-interface CaixaContextData {
-  caixaAberto: boolean;
-  caixaSession: Caixa | null;
-  movimentacoes: MovimentacaoCaixa[]; // Adicionado
-  abrirCaixa: (valorInicial: number) => Promise<void>;
-  fecharCaixa: (valorFinal: number) => Promise<void>;
-  adicionarSangria: (valor: number, observacao: string) => Promise<void>; // Adicionado
-  adicionarSuprimento: (valor: number, observacao: string) => Promise<void>; // Adicionado
+export interface Caixa {
+  id: string;
+  aberto: boolean;
+  saldo_inicial: number;
+  saldo_atual: number;
+  aberto_em: string;
+  fechado_em?: string;
+  operador?: string;
 }
 
-const CAIXA_STORAGE_KEY = '@SystMix:Caixa';
-const MOVIMENTACOES_STORAGE_KEY = '@SystMix:CaixaMovimentacoes';
+interface CaixaContextData {
+  caixaAberto: Caixa | null;
+  carregando: boolean;
+  abrirCaixa: (valorInicial: number) => Promise<void>;
+  fecharCaixa: (valorFinal: number) => Promise<void>;
+  registrarVenda: (valor: number, metodo: string) => Promise<void>;
+  verificarStatusCaixa: () => Promise<void>;
+}
 
 const CaixaContext = createContext<CaixaContextData>({} as CaixaContextData);
 
 export const CaixaProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [caixaSession, setCaixaSession] = useState<Caixa | null>(null);
-  const [caixaAberto, setCaixaAberto] = useState(false);
-  const [movimentacoes, setMovimentacoes] = useState<MovimentacaoCaixa[]>([]);
+  const [caixaAberto, setCaixaAberto] = useState<Caixa | null>(null);
+  const [carregando, setCarregando] = useState(true);
   
+  const { isOnline } = useOnlineStatus();
+  const { session } = useAuth(); // Pega a sessão do usuário
   const { addToast } = useToast();
-  const { isOnline } = useOnlineStatus(); 
 
-  // Carrega estado inicial
   useEffect(() => {
-    carregarCaixa();
-  }, [isOnline]);
-
-  const carregarCaixa = async () => {
-    // 1. Tenta carregar do LocalStorage primeiro (Cache)
-    const storedCaixa = localStorage.getItem(CAIXA_STORAGE_KEY);
-    const storedMovs = localStorage.getItem(MOVIMENTACOES_STORAGE_KEY);
-
-    if (storedCaixa) {
-        const session: Caixa = JSON.parse(storedCaixa);
-        if (!session.data_fechamento) {
-            setCaixaSession(session);
-            setCaixaAberto(true);
-            if (storedMovs) setMovimentacoes(JSON.parse(storedMovs));
-        }
+    if (session) {
+      verificarStatusCaixa();
+    } else {
+      setCaixaAberto(null);
+      setCarregando(false);
     }
+  }, [isOnline, session]);
 
-    // 2. Se estiver online, atualiza com o Supabase
-    if (isOnline) {
-        try {
-            const session = await supabaseCaixaService.obterCaixaAberto();
-            if (session) {
-                setCaixaSession(session);
-                setCaixaAberto(true);
-                localStorage.setItem(CAIXA_STORAGE_KEY, JSON.stringify(session));
-                
-                // Se tiver serviço de movimentações no supabase, carregaria aqui
-                // const movs = await supabaseCaixaService.listarMovimentacoes(session.id);
-                // setMovimentacoes(movs);
-            } else {
-                // Se o banco diz que não tem caixa aberto, mas o local diz que tem,
-                // pode ser conflito. Por segurança, limpamos se o banco confirmar fechado.
-                // Mas mantemos local se for apenas erro de conexão.
-            }
-        } catch (error) {
-            console.error("Erro ao sincronizar caixa:", error);
-        }
+  async function verificarStatusCaixa() {
+    if (!isOnline) {
+      setCarregando(false);
+      return;
     }
-  };
-
-  const abrirCaixa = async (valorInicial: number) => {
-    try {
-        let newSession: Caixa;
-
-        if (isOnline) {
-            await supabaseCaixaService.abrirCaixa(valorInicial);
-            const sessionDb = await supabaseCaixaService.obterCaixaAberto();
-            if (!sessionDb) throw new Error("Erro ao recuperar caixa aberto.");
-            newSession = sessionDb;
-        } else {
-            // Lógica Offline
-            newSession = {
-                id: `offline_${Date.now()}`,
-                data_abertura: new Date().toISOString(),
-                valor_inicial: valorInicial,
-            };
-        }
-
-        setCaixaSession(newSession);
-        setCaixaAberto(true);
-        setMovimentacoes([]); // Limpa movimentações anteriores
-        localStorage.setItem(CAIXA_STORAGE_KEY, JSON.stringify(newSession));
-        localStorage.removeItem(MOVIMENTACOES_STORAGE_KEY);
-        
-        addToast('Caixa aberto com sucesso!', 'success');
-    } catch (error: any) {
-        addToast(error.message || 'Erro ao abrir caixa.', 'error');
-        throw error;
-    }
-  };
-
-  const fecharCaixa = async (valorFinal: number) => {
-    if (!caixaSession) return;
-
-    try {
-        if (isOnline) {
-            await supabaseCaixaService.fecharCaixa(caixaSession.id, valorFinal);
-        } else {
-            // Lógica Offline
-            console.log('Fechamento offline registrado', { ...caixaSession, valor_final: valorFinal });
-        }
-
-        setCaixaSession(null);
-        setCaixaAberto(false);
-        setMovimentacoes([]);
-        localStorage.removeItem(CAIXA_STORAGE_KEY);
-        localStorage.removeItem(MOVIMENTACOES_STORAGE_KEY);
-        
-        addToast('Caixa fechado com sucesso!', 'success');
-    } catch (error: any) {
-        addToast('Erro ao fechar caixa.', 'error');
-        throw error;
-    }
-  };
-
-  // Funções Auxiliares para adicionar movimento no estado e storage
-  const registrarMovimento = async (tipo: 'sangria' | 'suprimento', valor: number, observacao: string) => {
-    if (!caixaSession) return;
-
-    const novaMovimentacao: MovimentacaoCaixa = {
-        id: `mov_${Date.now()}`,
-        id_caixa: caixaSession.id,
-        tipo,
-        valor,
-        observacao,
-        criado_em: new Date().toISOString(),
-        usuario_nome: 'Operador Atual' // Idealmente viria do AuthContext
-    };
-
-    // Atualiza estado
-    const novasMovimentacoes = [...movimentacoes, novaMovimentacao];
-    setMovimentacoes(novasMovimentacoes);
     
-    // Persiste localmente
-    localStorage.setItem(MOVIMENTACOES_STORAGE_KEY, JSON.stringify(novasMovimentacoes));
+    try {
+      // Busca o último caixa que esteja aberto
+      const { data, error } = await supabase
+        .from('caixas')
+        .select('*')
+        .eq('aberto', true)
+        .order('aberto_em', { ascending: false })
+        .limit(1)
+        .single();
 
-    // Se estiver online, tentaria salvar no banco (simulado aqui)
-    if (isOnline) {
-        // await supabaseCaixaService.adicionarMovimentacao(novaMovimentacao);
+      if (error) {
+        if (error.code !== 'PGRST116') { // Ignora erro "nenhum resultado encontrado"
+          console.error('Erro ao verificar caixa:', error);
+        }
+        setCaixaAberto(null);
+      } else {
+        setCaixaAberto(data);
+      }
+    } catch (error) {
+      console.error('Erro geral no caixa:', error);
+    } finally {
+      setCarregando(false);
     }
-  };
+  }
 
-  const adicionarSangria = async (valor: number, observacao: string) => {
-    await registrarMovimento('sangria', valor, observacao);
-  };
+  async function abrirCaixa(valorInicial: number) {
+    if (!isOnline) throw new Error('Necessário estar online para abrir o caixa.');
+    
+    const operadorEmail = session?.user?.email || 'Sistema';
 
-  const adicionarSuprimento = async (valor: number, observacao: string) => {
-    await registrarMovimento('suprimento', valor, observacao);
-  };
+    try {
+      // 1. Cria o registro do caixa
+      const { data: novoCaixa, error: erroCaixa } = await supabase
+        .from('caixas')
+        .insert([{
+          aberto: true,
+          saldo_inicial: valorInicial,
+          saldo_atual: valorInicial,
+          operador: operadorEmail,
+          aberto_em: new Date().toISOString()
+        }])
+        .select()
+        .single();
+
+      if (erroCaixa) throw erroCaixa;
+
+      // 2. Registra a movimentação de abertura
+      const { error: erroMov } = await supabase.from('movimentacoes_caixa').insert([{
+          id_caixa: novoCaixa.id,
+          tipo: 'abertura',
+          valor: valorInicial,
+          descricao: `Abertura por ${operadorEmail}`
+      }]);
+
+      if (erroMov) {
+        console.error("Erro ao criar movimentação (não crítico):", erroMov);
+      }
+
+      setCaixaAberto(novoCaixa);
+      
+    } catch (error: any) {
+      console.error("Falha ao abrir caixa:", error);
+      throw new Error(error.message || "Erro ao criar registro no banco.");
+    }
+  }
+
+  async function fecharCaixa(valorFinal: number) {
+    if (!caixaAberto || !isOnline) return;
+
+    try {
+      // 1. Atualiza o caixa para fechado
+      const { error } = await supabase
+        .from('caixas')
+        .update({
+          aberto: false,
+          saldo_atual: valorFinal, // Atualiza com o valor final de conferência
+          fechado_em: new Date().toISOString()
+        })
+        .eq('id', caixaAberto.id);
+
+      if (error) throw error;
+
+      // 2. Registra movimentação de fechamento
+      await supabase.from('movimentacoes_caixa').insert([{
+          id_caixa: caixaAberto.id,
+          tipo: 'fechamento',
+          valor: valorFinal,
+          descricao: 'Fechamento de Caixa'
+      }]);
+
+      setCaixaAberto(null);
+      
+    } catch (error: any) {
+      console.error("Erro ao fechar caixa:", error);
+      throw new Error("Não foi possível fechar o caixa no banco de dados.");
+    }
+  }
+
+  async function registrarVenda(valor: number, metodo: string) {
+    if (!caixaAberto || !isOnline) return;
+
+    // Aumenta o saldo APENAS se for dinheiro (regra padrão)
+    if (metodo.toUpperCase().includes('DINHEIRO')) {
+        const novoSaldo = (Number(caixaAberto.saldo_atual) || 0) + valor;
+        
+        const { error } = await supabase.from('caixas')
+            .update({ saldo_atual: novoSaldo })
+            .eq('id', caixaAberto.id);
+        
+        if (!error) {
+            setCaixaAberto(prev => prev ? { ...prev, saldo_atual: novoSaldo } : null);
+        }
+    }
+  }
 
   return (
-    <CaixaContext.Provider value={{
-      caixaAberto,
-      caixaSession,
-      movimentacoes,
-      abrirCaixa,
+    <CaixaContext.Provider value={{ 
+      caixaAberto, 
+      carregando, 
+      abrirCaixa, 
       fecharCaixa,
-      adicionarSangria,
-      adicionarSuprimento
+      registrarVenda,
+      verificarStatusCaixa
     }}>
       {children}
     </CaixaContext.Provider>
   );
 };
 
-export function useCaixa(): CaixaContextData {
-  const context = useContext(CaixaContext);
-  if (!context) throw new Error('useCaixa must be used within a CaixaProvider');
-  return context;
-}
+export const useCaixa = () => useContext(CaixaContext);

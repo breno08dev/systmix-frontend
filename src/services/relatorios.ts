@@ -1,56 +1,65 @@
-// src/services/relatorios.ts (VERSÃO ATUALIZADA)
-import { RelatorioVendas, ResumoDashboard } from '../types';
+// src/services/relatorios.ts
 import { supabase } from '../lib/supabaseClient';
 
-function lancarErroSupabase(error: any) {
-  console.error('Erro no Supabase:', error);
-  const mensagemErro = error.details || error.message || 'Ocorreu um erro na operação com o banco de dados.';
-  throw new Error(mensagemErro);
-}
-
-// Mapeamento para a busca personalizada
-function mapSupabaseRelatorioToRelatorio(data: any): RelatorioVendas {
-  return {
-    total_vendas: data.total_vendas || 0,
-    total_comandas: data.total_comandas || 0,
-    ticket_medio: data.ticket_medio || 0,
-    pagamentos_por_metodo: data.pagamentos_por_metodo || []
-  };
+export interface ResumoFinanceiro {
+  totalGeral: number;
+  totalDinheiro: number;
+  totalPix: number;
+  totalCartao: number;
+  qtdVendas: number;
+  ticketMedio: number;
 }
 
 export const relatoriosService = {
   
-  // Função para a BUSCA PERSONALIZADA
-  async obterVendasPorPeriodo(dataInicio: string, dataFim: string): Promise<RelatorioVendas> {
-    
-    // Chama a função que criamos no Script 3
-    const { data, error } = await supabase.rpc('obter_vendas_por_periodo', {
-      p_data_inicio: dataInicio,
-      p_data_fim: dataFim
-    });
+  async buscarResumoFinanceiro(isOnline: boolean, dataInicio: string, dataFim: string): Promise<ResumoFinanceiro> {
+    if (!isOnline) {
+       return { totalGeral: 0, totalDinheiro: 0, totalPix: 0, totalCartao: 0, qtdVendas: 0, ticketMedio: 0 };
+    }
+
+    // CORREÇÃO DE FUSO HORÁRIO
+    // Cria datas considerando o horário LOCAL do navegador (00:00 até 23:59:59)
+    // Adicionar 'T00:00:00' força o JS a entender como horário local, não UTC.
+    const start = new Date(`${dataInicio}T00:00:00`);
+    const end = new Date(`${dataFim}T23:59:59.999`);
+
+    const { data, error } = await supabase
+      .from('pagamentos')
+      .select('valor, metodo')
+      // Converte para ISO (UTC) apenas na hora de enviar para o banco
+      .gte('data', start.toISOString())
+      .lte('data', end.toISOString());
 
     if (error) {
-      lancarErroSupabase(error);
-    }
-    if (!data) {
-      throw new Error('Não foi possível gerar o relatório.');
+        console.error("Erro ao buscar pagamentos:", error);
+        throw error;
     }
 
-    return mapSupabaseRelatorioToRelatorio(data);
-  },
+    const pagamentos = data || [];
 
-  // Função para o RESUMO GERAL (Hoje, Ontem...)
-  async obterResumoGeral(): Promise<ResumoDashboard> {
+    // Cálculos dos Totais
+    const totalDinheiro = pagamentos
+        .filter(p => p.metodo === 'DINHEIRO')
+        .reduce((acc, curr) => acc + Number(curr.valor), 0);
+
+    const totalPix = pagamentos
+        .filter(p => p.metodo === 'PIX')
+        .reduce((acc, curr) => acc + Number(curr.valor), 0);
+
+    const totalCartao = pagamentos
+        .filter(p => p.metodo === 'CARTAO')
+        .reduce((acc, curr) => acc + Number(curr.valor), 0);
     
-    // Chama a função que criamos no Script 2
-    const { data, error } = await supabase.rpc('get_dashboard_summary');
+    const totalGeral = totalDinheiro + totalPix + totalCartao;
+    const qtdVendas = pagamentos.length;
 
-    if (error) {
-      lancarErroSupabase(error);
-    }
-    if (!data) {
-      throw new Error('Não foi possível buscar o resumo geral.');
-    }
-    return data as ResumoDashboard;
+    return {
+      totalGeral,
+      totalDinheiro,
+      totalPix,
+      totalCartao,
+      qtdVendas,
+      ticketMedio: qtdVendas > 0 ? totalGeral / qtdVendas : 0
+    };
   }
 };

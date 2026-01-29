@@ -10,9 +10,9 @@ function createWindow() {
     width: 1280,
     height: 720,
     icon: iconPath,
-    // <--- Usa o caminho calculado acima
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.js"),
+      // Atenção: Mantendo .cjs pois é o padrão do seu build
+      preload: path.join(__dirname$1, "preload.cjs"),
       nodeIntegration: false,
       contextIsolation: true
     }
@@ -26,12 +26,8 @@ function createWindow() {
 }
 app.whenReady().then(createWindow);
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform !== "darwin") app.quit();
 });
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });

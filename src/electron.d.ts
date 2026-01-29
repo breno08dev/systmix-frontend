@@ -9,6 +9,15 @@ export interface PendingAction {
   criado_em?: string;
 }
 
+export {};
+
+declare global {
+  interface Window {
+    electron: {
+      imprimir: (html: string) => Promise<boolean>;
+    };
+  }
+}
 // Interface da API que expomos no preload.ts
 export interface ILocalApi {
   // Clientes

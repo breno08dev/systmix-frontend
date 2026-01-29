@@ -9,11 +9,14 @@ import Modal from '../Shared/Modal';
 import { ConfirmacaoModal } from '../Common/ConfirmacaoModal'; 
 import { X, Plus, Minus, Trash2, CreditCard, Banknote, QrCode, Printer, Search, ShoppingCart, User, Clock, Loader2, Receipt, Percent, Package } from 'lucide-react';
 
+
 const METODOS_PAGAMENTO_COMANDA = {
     DINHEIRO: 'Dinheiro - Comanda',
     CARTAO: 'Cartão - Comanda',
     PIX: 'Pix - Comanda',
 };
+
+
 
 const formatTimeSafe = (dateString: any) => {
     if (!dateString) return '--:--';
@@ -106,30 +109,39 @@ export default function ComandaModal({
 
   const adicionarProduto = async (produto: Produto) => {
     if (carregando) return;
-    if (produto.estoque <= 0) return addToast('Produto esgotado!', 'error');
+    
+    // Validação visual rápida (opcional, pois o banco já valida)
+    if (produto.estoque <= 0) return addToast('Produto esgotado visualmente!', 'error');
 
     setCarregando(true);
     try {
-      const itemRetornado = await comandasService.adicionarItem(isOnline, comandaAtual.id, {
+      // O Backend agora vai:
+      // 1. Checar estoque real
+      // 2. Agrupar se já existir
+      // 3. Baixar estoque
+      await comandasService.adicionarItem(isOnline, comandaAtual.id, {
         id_produto: produto.id,
         quantidade: 1,
         valor_unit: produto.preco,
       });
 
-      if (itemRetornado) {
-        setComandaAtual(prev => ({
-           ...prev, 
-           itens: [...(prev.itens || []), itemRetornado] 
-        }));
-        onItemUpdated(comandaAtual.id); 
+      // Recarrega a comanda inteira para pegar o agrupamento feito pelo banco
+      const comandaAtualizada = await comandasService.buscarPorId(isOnline, comandaAtual.id);
+      if(comandaAtualizada) {
+         setComandaAtual(comandaAtualizada);
+         onItemUpdated(comandaAtual.id);
       }
+      
+      addToast('Item adicionado!', 'success');
+
     } catch (error: any) {
+      // Aqui vai aparecer o erro: "Estoque insuficiente de Coca Cola..."
+      console.error(error);
       addToast(error.message || 'Erro ao adicionar.', 'error');
     } finally {
       setCarregando(false);
     }
   };
-
   const alterarQuantidade = async (itemId: string, novaQuantidade: number) => {
     if (novaQuantidade < 1) return solicitarRemocaoItem(itemId);
     

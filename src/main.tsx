@@ -1,10 +1,20 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App.tsx';
-import './index.css';
+// src/main.tsx
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.tsx'
+import './index.css'
+import { ToastProvider } from './contexts/ToastContext'
+import { AuthProvider } from './auth/AuthContext'
+import { SyncProvider } from './contexts/SyncContext' // <--- Importante
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-);
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <ToastProvider>
+      <AuthProvider>
+        <SyncProvider> {/* <--- O SyncProvider deve envolver o App */}
+          <App />
+        </SyncProvider>
+      </AuthProvider>
+    </ToastProvider>
+  </React.StrictMode>,
+)

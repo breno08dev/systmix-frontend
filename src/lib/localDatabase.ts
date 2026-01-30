@@ -1,27 +1,25 @@
 // src/lib/localDatabase.ts
 import Dexie, { Table } from 'dexie';
-// Importamos os tipos existentes. Note que PagamentoInput existe, mas Pagamento não.
+// Mantendo suas importações originais
 import { Comanda, ItemComanda, Produto, Cliente, PagamentoInput } from '../types';
 
 // -------------------------------------------------------------------------
-// 1. TIPOS LOCAIS (Para não alterar o src/types/index.ts)
+// 1. TIPOS LOCAIS
 // -------------------------------------------------------------------------
 
-// Definimos Pagamento localmente estendendo o Input (metodo/valor)
 export interface Pagamento extends PagamentoInput {
   id: string;
   id_comanda: string;
   data: string;
 }
 
-// Estendemos a Comanda original para incluir a lista de pagamentos no banco local
 export interface ComandaLocal extends Comanda {
   pagamentos: Pagamento[];
 }
 
-// Definição da Fila de Sincronização
+// ATUALIZADO: Adicionado campo 'tentativas' para controle do Sync
 export type PendingAction = {
-  id?: number; // Autoincrementado pelo Dexie
+  id?: number; 
   type: 
     | 'CRIAR_COMANDA' 
     | 'ADICIONAR_ITEM' 
@@ -38,6 +36,7 @@ export type PendingAction = {
 
   payload: any;
   criado_em: number;
+  tentativas?: number; // <--- NOVO: Evita loop infinito no Sync
 };
 
 // -------------------------------------------------------------------------
@@ -45,7 +44,6 @@ export type PendingAction = {
 // -------------------------------------------------------------------------
 
 export class LocalDatabase extends Dexie {
-  // Usamos ComandaLocal aqui para garantir que o campo 'pagamentos' exista
   comandas!: Table<ComandaLocal, string>; 
   itensComanda!: Table<ItemComanda, string>;
   produtos!: Table<Produto, string>;
@@ -55,10 +53,11 @@ export class LocalDatabase extends Dexie {
 
   constructor() {
     super('SystMixDatabase');
+    // Mantendo seu schema original. O campo 'tentativas' não precisa estar aqui para ser salvo.
     this.version(1).stores({
       comandas: 'id, numero, status', 
       itensComanda: 'id, id_comanda, id_produto',
-      produtos: 'id, nome, ativo', // Ajustado conforme seu types/index.ts
+      produtos: 'id, nome, ativo', 
       clientes: 'id, nome, telefone',
       pagamentos: 'id, id_comanda',
       pending_actions: '++id, criado_em' 
@@ -68,7 +67,6 @@ export class LocalDatabase extends Dexie {
 
 export const db = new LocalDatabase();
 
-// Helper para gerar ID temporário
 const createLocalId = () => `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 // -------------------------------------------------------------------------
@@ -77,13 +75,14 @@ const createLocalId = () => `local_${Date.now()}_${Math.random().toString(36).su
 
 export const localDatabaseService = {
   
-  // --- GERENCIAMENTO DA FILA (PENDING ACTIONS) ---
+  // --- GERENCIAMENTO DA FILA (ATUALIZADO) ---
   
   async addPendingAction(type: PendingAction['type'], payload: any): Promise<void> {
     const newAction: Omit<PendingAction, 'id'> = { 
       type, 
       payload, 
-      criado_em: Date.now() 
+      criado_em: Date.now(),
+      tentativas: 0 // <--- NOVO: Inicializa contador
     };
     await db.pending_actions.add(newAction as PendingAction);
     console.log(`OFFLINE: Ação agendada [${type}]`, payload);
@@ -99,17 +98,14 @@ export const localDatabaseService = {
     await db.pending_actions.delete(id);
   },
 
-  // --- COMANDAS ---
+  // --- COMANDAS (MANTIDO ORIGINAL) ---
 
   async listarAbertas(): Promise<ComandaLocal[]> {
-    // Busca apenas as abertas
     const comandasLocais = await db.comandas.where('status').equals('aberta').toArray();
     
-    // Preenche os relacionamentos manualmente (Join manual)
     for (const comanda of comandasLocais) {
       comanda.itens = await db.itensComanda.where('id_comanda').equals(comanda.id).toArray();
       
-      // Busca dados do produto para exibir nome/preço na lista
       if (comanda.itens) {
         for (const item of comanda.itens) {
             const produtoRel = await db.produtos.get(item.id_produto);
@@ -121,7 +117,6 @@ export const localDatabaseService = {
         comanda.cliente = await db.clientes.get(comanda.id_cliente);
       }
       
-      // Carrega pagamentos vinculados
       comanda.pagamentos = await db.pagamentos.where('id_comanda').equals(comanda.id).toArray();
     }
     return comandasLocais;
@@ -141,7 +136,6 @@ export const localDatabaseService = {
     
     await db.comandas.add(novaComanda); 
 
-    // IMPORTANTE: Envia 'idTemp' no payload para o Sync saber mapear depois
     await this.addPendingAction('CRIAR_COMANDA', { 
       numero, 
       id_cliente: idCliente, 
@@ -162,7 +156,6 @@ export const localDatabaseService = {
     
     await db.itensComanda.add(novoItem);
 
-    // Agenda Sync
     await this.addPendingAction('ADICIONAR_ITEM', { 
         ...novoItem,
         id_comanda: idComanda 
@@ -172,10 +165,8 @@ export const localDatabaseService = {
   },
 
   async fecharComanda(idComanda: string, pagamentosInput: PagamentoInput[]): Promise<void> {
-    // 1. Atualiza status da comanda
     await db.comandas.update(idComanda, { status: 'fechada', fechado_em: new Date().toISOString() });
     
-    // 2. Registra pagamentos localmente com ID e Data
     const pagamentosCompletos: Pagamento[] = [];
     
     for (const pag of pagamentosInput) {
@@ -192,11 +183,9 @@ export const localDatabaseService = {
       pagamentosCompletos.push(novoPagamento);
     }
 
-    // 3. Agenda Sync enviando APENAS o necessário (PagamentoInput)
-    // O backend geralmente espera [{metodo, valor}, ...]
     await this.addPendingAction('FECHAR_COMANDA', { 
       id_comanda: idComanda, 
-      pagamentos: pagamentosInput // Enviamos o input limpo
+      pagamentos: pagamentosInput
     });
   },
 
@@ -225,15 +214,13 @@ export const localDatabaseService = {
     });
   },
 
-  // --- PRODUTOS ---
+  // --- PRODUTOS (MANTIDO ORIGINAL) ---
 
   async listarProdutos(): Promise<Produto[]> {
     return db.produtos.toArray();
   },
   
   async listarProdutosAtivos(): Promise<Produto[]> {
-    // Nota: Se 'ativo' for boolean no TS, o Dexie pode armazenar como 0/1 ou true/false dependendo do adapter.
-    // Se tiver problemas, tente .filter(p => p.ativo)
     return db.produtos.filter(p => p.ativo === true).toArray();
   },
 
@@ -259,7 +246,7 @@ export const localDatabaseService = {
     await db.produtos.delete(id);
   },
 
-  // --- CLIENTES ---
+  // --- CLIENTES (MANTIDO ORIGINAL) ---
 
   async listarClientes(): Promise<Cliente[]> {
     return db.clientes.toArray();

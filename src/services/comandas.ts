@@ -16,15 +16,21 @@ export const comandasService = {
         
         if (error) throw error;
         
-        const comandas = data || [];
+       const comandas = data || [];
 
-        // CACHE: Salva comandas e itens para uso offline
+        // CACHE: Salva comandas, itens E CLIENTES para uso offline
         if (comandas.length > 0) {
             const comandasLimpas = comandas.map(({ itens: _itens, cliente: _cliente, ...resto }) => resto);
             await db.comandas.bulkPut(comandasLimpas as any);
 
             const todosItens = comandas.flatMap(c => c.itens || []);
             await db.itensComanda.bulkPut(todosItens as any);
+            
+            // NOVO: Extrair e salvar clientes para garantir que existam offline
+            const clientesEncontrados = comandas.map(c => c.cliente).filter(c => !!c);
+            if (clientesEncontrados.length > 0) {
+                 await db.clientes.bulkPut(clientesEncontrados as any);
+            }
         }
         
         return comandas;

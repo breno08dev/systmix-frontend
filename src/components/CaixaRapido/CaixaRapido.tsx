@@ -71,6 +71,7 @@ export const CaixaRapido: React.FC = () => {
         const itemExistente = prev.find(item => item.id === produto.id);
         
         if (itemExistente) {
+            // Verifica se a quantidade futura excede o estoque atual
             if (itemExistente.quantidadeCarrinho + 1 > produto.estoque) {
                 addToast(`Estoque insuficiente! Só restam ${produto.estoque} unidades.`, 'error');
                 return prev;
@@ -111,7 +112,6 @@ export const CaixaRapido: React.FC = () => {
 
     setProcessandoVenda(true);
     try {
-        // GERA NUMERO ALEATÓRIO PARA NÃO TRAVAR COM CHAVE DUPLICADA
         const numeroVenda = Math.floor(Math.random() * 90000) + 10000;
 
         const comanda = await comandasService.criarComanda(isOnline, numeroVenda, undefined);
@@ -133,7 +133,7 @@ export const CaixaRapido: React.FC = () => {
 
         addToast(`Venda finalizada! Troco: R$ ${troco.toFixed(2)}`, 'success');
         
-        await carregarProdutos(); // Recarrega estoque
+        await carregarProdutos(); // Recarrega estoque após venda
         
         setCarrinho([]);
         setValorRecebido('');

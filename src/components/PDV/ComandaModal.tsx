@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useReactToPrint } from 'react-to-print';
 import { comandasService } from '../../services/comandas';
+import { useCaixa } from '../../contexts/CaixaContext'; // <--- 1. IMPORTAR CONTEXTO
 import { Comanda, Produto } from '../../types';
 import { Comprovante } from './Comprovante';
 import { useToast } from '../../contexts/ToastContext';
@@ -15,8 +16,6 @@ const METODOS_PAGAMENTO_COMANDA = {
     CARTAO: 'Cartão - Comanda',
     PIX: 'Pix - Comanda',
 };
-
-
 
 const formatTimeSafe = (dateString: any) => {
     if (!dateString) return '--:--';
@@ -51,7 +50,7 @@ export default function ComandaModal({
   const [metodoPagamento, setMetodoPagamento] = useState(METODOS_PAGAMENTO_COMANDA.DINHEIRO);
   const [valorPagamento, setValorPagamento] = useState('');
   const [carregando, setCarregando] = useState(false);
-  const [loadingInicial, setLoadingInicial] = useState(true); // Novo estado
+  const [loadingInicial, setLoadingInicial] = useState(true); 
   const [taxaServico, setTaxaServico] = useState(false);
 
   const [confirmacao, setConfirmacao] = useState({
@@ -64,8 +63,8 @@ export default function ComandaModal({
   
   const comprovanteRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
+  const { registrarVenda, caixaAberto } = useCaixa(); // <--- 2. USAR O HOOK
 
-  // --- CORREÇÃO: Carregar dados frescos ao abrir ---
   useEffect(() => {
     if (comandaInicial.id) {
         carregarDadosFrescos();
@@ -85,7 +84,6 @@ export default function ComandaModal({
         setLoadingInicial(false);
     }
   };
-  // ------------------------------------------------
 
   const subtotalComanda = useMemo(() => {
     return comandaAtual.itens?.reduce((total, item) => total + item.quantidade * item.valor_unit, 0) || 0;
@@ -110,53 +108,57 @@ export default function ComandaModal({
   const adicionarProduto = async (produto: Produto) => {
     if (carregando) return;
     
-    // Validação visual rápida (opcional, pois o banco já valida)
-    if (produto.estoque <= 0) return addToast('Produto esgotado visualmente!', 'error');
+    if (produto.estoque <= 0) return addToast('Produto esgotado!', 'error');
 
     setCarregando(true);
     try {
-      // O Backend agora vai:
-      // 1. Checar estoque real
-      // 2. Agrupar se já existir
-      // 3. Baixar estoque
       await comandasService.adicionarItem(isOnline, comandaAtual.id, {
         id_produto: produto.id,
         quantidade: 1,
         valor_unit: produto.preco,
       });
 
-      // Recarrega a comanda inteira para pegar o agrupamento feito pelo banco
       const comandaAtualizada = await comandasService.buscarPorId(isOnline, comandaAtual.id);
       if(comandaAtualizada) {
          setComandaAtual(comandaAtualizada);
          onItemUpdated(comandaAtual.id);
       }
-      
       addToast('Item adicionado!', 'success');
 
     } catch (error: any) {
-      // Aqui vai aparecer o erro: "Estoque insuficiente de Coca Cola..."
       console.error(error);
       addToast(error.message || 'Erro ao adicionar.', 'error');
     } finally {
       setCarregando(false);
     }
   };
+
   const alterarQuantidade = async (itemId: string, novaQuantidade: number) => {
     if (novaQuantidade < 1) return solicitarRemocaoItem(itemId);
     
-    // Atualização otimista
-    setComandaAtual(prev => ({
-        ...prev,
-        itens: (prev.itens || []).map(i => i.id === itemId ? { ...i, quantidade: novaQuantidade } : i)
-    }));
+    const itemAtual = comandaAtual.itens?.find(i => i.id === itemId);
+    
+    if (itemAtual && novaQuantidade > itemAtual.quantidade) {
+        const produtoRef = produtos.find(p => p.id === itemAtual.id_produto);
+        const diferenca = novaQuantidade - itemAtual.quantidade;
+        
+        if (produtoRef && produtoRef.estoque < diferenca) {
+             addToast(`Estoque insuficiente! Apenas ${produtoRef.estoque} un. disponíveis.`, 'error');
+             return;
+        }
+    }
 
     try {
       await comandasService.atualizarQuantidadeItem(isOnline, comandaAtual.id, itemId, novaQuantidade);
+      
+      setComandaAtual(prev => ({
+          ...prev,
+          itens: (prev.itens || []).map(i => i.id === itemId ? { ...i, quantidade: novaQuantidade } : i)
+      }));
       onItemUpdated(comandaAtual.id);
+
     } catch (error) {
       addToast('Erro ao atualizar quantidade.', 'error');
-      // Em caso de erro, o ideal seria reverter ou recarregar
       carregarDadosFrescos(); 
     }
   };
@@ -185,6 +187,8 @@ export default function ComandaModal({
   };
   
   const solicitarFechamento = () => {
+    if (!caixaAberto) return addToast('O Caixa precisa estar aberto para receber valores!', 'error'); // <--- 3. VALIDAÇÃO
+
     if (totalFinal <= 0) return addToast('Comanda vazia.', 'error');
     
     const valorPago = parseFloat(valorPagamento) || totalFinal;
@@ -204,10 +208,21 @@ export default function ComandaModal({
   const fecharComandaConfirmado = async () => {
     setCarregando(true);
     try {
+      // 4. PRIMEIRO FECHA A COMANDA (BANCO)
       await comandasService.fecharComanda(isOnline, comandaAtual.id, [{
         metodo: metodoPagamento,
         valor: totalFinal,
       }]);
+      
+      // 5. DEPOIS ATUALIZA O SALDO DA GAVETA (CONTEXTO)
+      // Mapeia o método de pagamento da comanda para o formato do caixa
+      let metodoCaixa = 'OUTROS';
+      if (metodoPagamento.includes('Dinheiro')) metodoCaixa = 'DINHEIRO';
+      else if (metodoPagamento.includes('Cartão')) metodoCaixa = 'CARTAO';
+      else if (metodoPagamento.includes('Pix')) metodoCaixa = 'PIX';
+      
+      await registrarVenda(totalFinal, metodoCaixa); // <--- IMPORTANTE
+
       addToast(`Comanda fechada com sucesso!`, 'success');
       onClose(comandaAtual.id); 
     } catch (error) {
@@ -343,7 +358,7 @@ export default function ComandaModal({
                         </div>
                     </div>
                 ) : (
-                    /* PAGAMENTO (Simplificado para caber) */
+                    /* PAGAMENTO */
                     <div className="flex flex-col h-full animate-[fade-in_0.2s]">
                         <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><CreditCard className="text-indigo-600" /> Método</h3>
                         <div className="grid grid-cols-3 gap-4 mb-6">

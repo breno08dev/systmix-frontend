@@ -14,98 +14,103 @@ interface SyncContextData {
 
 const SyncContext = createContext<SyncContextData>({} as SyncContextData);
 
+// --- TRAVA GLOBAL (Fora do Componente) ---
+// Isso garante que apenas UM processo de sync rode na aplicação inteira,
+// independente de quantos Providers existam ou do StrictMode.
+let isGlobalSyncingLocked = false;
+
 export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { isOnline } = useOnlineStatus();
   const { addToast } = useToast();
   const [isSyncing, setIsSyncing] = useState(false);
-  const hasSyncedSinceOnline = useRef(false); 
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const processSyncQueue = async () => {
-    if (isSyncing) return; 
-
-    setIsSyncing(true);
-    hasSyncedSinceOnline.current = true;
-    
-    console.log('SYNC: Iniciando varredura de pendências...'); 
+    // Verifica a trava global
+    if (isGlobalSyncingLocked) {
+        console.log('SYNC: Tentativa de execução paralela bloqueada pelo Global Lock.');
+        return;
+    }
 
     try {
+      // Ativa a trava global
+      isGlobalSyncingLocked = true;
+      setIsSyncing(true);
+      
+      console.log('SYNC: Iniciando varredura (Global Lock Ativo)...'); 
+
+      // Pequeno delay para garantir estabilidade
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       const pendingActions = await localDatabaseService.getPendingActions();
       
       if (pendingActions.length === 0) {
-        setIsSyncing(false);
         return;
       }
 
       addToast(`Sincronizando ${pendingActions.length} ações pendentes...`, 'error');
 
-      // Mapa de Tradução (ID Local -> ID Real UUID)
       const idMap: Record<string, string> = {};
+      const processedThisBatch = new Set<number>();
 
       for (const action of pendingActions) {
+          // Proteção contra duplicidade de ID no mesmo lote
+          if (action.id && processedThisBatch.has(action.id)) continue;
+          if (action.id) processedThisBatch.add(action.id);
+
           try {
-            // Clona o payload
             let payload = JSON.parse(JSON.stringify(action.payload));
 
-            // --- 1. TRADUÇÃO DE IDS (Local -> Real) ---
+            // --- TRADUÇÃO DE IDS ---
             if (payload.id_comanda && idMap[payload.id_comanda]) payload.id_comanda = idMap[payload.id_comanda];
             if (payload.idComanda && idMap[payload.idComanda]) payload.idComanda = idMap[payload.idComanda];
             if (payload.idCliente && idMap[payload.idCliente]) payload.idCliente = idMap[payload.idCliente];
             if (payload.id_cliente && idMap[payload.id_cliente]) payload.id_cliente = idMap[payload.id_cliente];
+            if (payload.idItem && idMap[payload.idItem]) payload.idItem = idMap[payload.idItem];
+            if (payload.id_item && idMap[payload.id_item]) payload.id_item = idMap[payload.id_item];
 
             console.log(`SYNC: Executando ${action.type}`, payload);
             
-            let shouldRemoveAction = true; // Flag para controlar se removemos da fila
+            let shouldRemoveAction = true; 
 
             switch (action.type) {
               case 'CRIAR_CLIENTE':
                 try {
                     const { id: _idCli, criado_em: _cEmCli, ...clienteLimpo } = payload.cliente;
                     const novoCliente: any = await clientesService.criar(true, clienteLimpo);
-                    
-                    if (novoCliente && payload.tempId) {
-                        idMap[payload.tempId] = novoCliente.id;
-                        await db.clientes.delete(payload.tempId); 
+                    const tempIdCliente = payload.tempId || payload.idTemp;
+                    if (novoCliente && tempIdCliente) {
+                        idMap[tempIdCliente] = novoCliente.id;
+                        await db.clientes.delete(tempIdCliente); 
                     }
                 } catch (err: any) {
-                    console.error("Erro ao criar cliente sync:", err);
+                    console.error("Erro sync cliente:", err);
                     throw err; 
                 }
                 break;
 
               case 'CRIAR_COMANDA':
                 const idClienteFinal = idMap[payload.idCliente] || (payload.idCliente?.toString().startsWith('local_') ? null : payload.idCliente);
-                
+                const tempIdComanda = payload.tempId || payload.idTemp; 
+
                 try {
                     const novaComanda = await comandasService.criarComanda(true, payload.numero, idClienteFinal);
-                    if (novaComanda && payload.tempId) {
-                        idMap[payload.tempId] = novaComanda.id;
-                        await db.comandas.delete(payload.tempId);
+                    if (novaComanda && tempIdComanda) {
+                        idMap[tempIdComanda] = novaComanda.id;
+                        await db.comandas.delete(tempIdComanda);
                     }
                 } catch (err: any) {
-                    // TRATAMENTO DE CONFLITO (409) - Comanda já existe
                     if (err.code === '23505' || err.message?.includes('duplicate key') || err.status === 409) {
-                        console.warn(`SYNC: Comanda ${payload.numero} já existe. Recuperando ID...`);
-                        
-                        // Busca a comanda existente para pegar o ID real
-                        const { data: existente } = await supabase
-                            .from('comandas')
-                            .select('*')
-                            .eq('numero', payload.numero)
-                            .eq('status', 'aberta')
-                            .single();
-
+                        console.warn(`SYNC: Comanda ${payload.numero} já existe. Recuperando...`);
+                        const { data: existente } = await supabase.from('comandas').select('*').eq('numero', payload.numero).eq('status', 'aberta').maybeSingle();
                         if (existente) {
-                            if (payload.tempId) idMap[payload.tempId] = existente.id;
-                            
-                            // Atualiza o cliente se necessário
+                            if (tempIdComanda) idMap[tempIdComanda] = existente.id;
                             if (!existente.id_cliente && idClienteFinal && !idClienteFinal.toString().startsWith('local_')) {
                                 await supabase.from('comandas').update({ id_cliente: idClienteFinal }).eq('id', existente.id);
                             }
-
-                            // Limpa local
-                            if (payload.tempId) await db.comandas.delete(payload.tempId);
+                            if (tempIdComanda) await db.comandas.delete(tempIdComanda);
                         } else {
-                            shouldRemoveAction = false;
+                            console.warn("Conflito de comanda fantasma. Removendo.");
                         }
                     } else {
                         throw err;
@@ -115,41 +120,61 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
               case 'ADICIONAR_ITEM':
                 const idComandaReal = payload.id_comanda || payload.idComanda;
-                
                 if (idComandaReal && !idComandaReal.toString().startsWith('local_')) {
-                    // CORREÇÃO: Removemos campos que não existem no banco online (adicionais/observacao)
                     const itemSanitizado = {
                         id_produto: payload.id_produto,
                         quantidade: Number(payload.quantidade),
                         valor_unit: Number(payload.valor_unit)
-                        // Removido 'observacao' e 'adicionais' pois o Supabase retornou erro de coluna inexistente
                     };
-                    
-                    await comandasService.adicionarItem(true, idComandaReal, itemSanitizado);
-                    
-                    if (payload.id && payload.id.toString().startsWith('local_')) {
-                        await db.itensComanda.delete(payload.id);
+                    try {
+                        const itemSalvo = await comandasService.adicionarItem(true, idComandaReal, itemSanitizado);
+                        if (payload.id && payload.id.toString().startsWith('local_')) {
+                            idMap[payload.id] = itemSalvo.id;
+                            await db.itensComanda.delete(payload.id);
+                        }
+                    } catch (err: any) {
+                        if (err.message === "COMANDA_NAO_ENCONTRADA_FATAL" || err.code === '23503') {
+                            shouldRemoveAction = true;
+                        } else {
+                            throw err;
+                        }
                     }
                 } else {
-                    console.warn(`SYNC: Item adiado. Dependência de comanda (${idComandaReal}) não resolvida.`);
                     shouldRemoveAction = false; 
                 }
                 break;
                 
               case 'REMOVER_ITEM':
                 try {
-                    await comandasService.removerItem(true, payload.idComanda, payload.idItem);
-                } catch (e) { console.warn("Item já removido ou inexistente", e); }
+                    const idIR = idMap[payload.idItem] || payload.idItem;
+                    const idCR = idMap[payload.idComanda] || payload.idComanda;
+                    if (!idIR.toString().startsWith('local_')) {
+                       await comandasService.removerItem(true, idCR, idIR);
+                    }
+                } catch (e) { console.warn("Item ja removido", e); }
                 break;
 
               case 'ATUALIZAR_QTD_ITEM':
-                await comandasService.atualizarQuantidadeItem(true, "", payload.idItem, payload.novaQuantidade);
+                const idItemAtualizar = idMap[payload.id_item] || payload.id_item;
+                if (idItemAtualizar && !idItemAtualizar.toString().startsWith('local_')) {
+                    await comandasService.atualizarQuantidadeItem(true, "", idItemAtualizar, payload.novaQuantidade);
+                } else {
+                    console.warn(`SYNC: Update QTD adiado (Item local).`);
+                }
                 break;
 
               case 'FECHAR_COMANDA':
                  const idComandaFechar = payload.idComanda || payload.id_comanda;
                  if (idComandaFechar && !idComandaFechar.toString().startsWith('local_')) {
-                    await comandasService.fecharComanda(true, idComandaFechar, payload.pagamentos, payload.dataFechamento);
+                    try {
+                        await comandasService.fecharComanda(true, idComandaFechar, payload.pagamentos, payload.dataFechamento);
+                    } catch (err: any) {
+                        if (err.message === "COMANDA_NAO_ENCONTRADA_FATAL" || err.code === '23503' || (err as any).status === 409) {
+                            shouldRemoveAction = true;
+                        } else {
+                            throw err;
+                        }
+                    }
                  } else {
                     shouldRemoveAction = false;
                  }
@@ -162,27 +187,24 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                  break;
 
               case 'ATUALIZAR_CLIENTE':
-                const realIdCliente = idMap[payload.id] || payload.id;
-                if (!realIdCliente.toString().startsWith('local_')) {
+                 // ...logica cliente...
+                 const realIdCli = idMap[payload.id] || payload.id;
+                 if (!realIdCli.toString().startsWith('local_')) {
                     const { id: _upId, criado_em: _upCr, ...dadosCli } = payload.cliente;
-                    await clientesService.atualizar(true, realIdCliente, dadosCli);
-                } else {
-                    shouldRemoveAction = false;
-                }
+                    await clientesService.atualizar(true, realIdCli, dadosCli);
+                 } else shouldRemoveAction = false;
                 break;
 
               case 'DELETAR_CLIENTE':
-                const delIdCliente = idMap[payload.id] || payload.id;
-                if (!delIdCliente.toString().startsWith('local_')) {
-                    await clientesService.deletar(true, delIdCliente);
-                }
+                 // ...logica cliente...
+                 const delId = idMap[payload.id] || payload.id;
+                 if (!delId.toString().startsWith('local_')) await clientesService.deletar(true, delId);
                 break;
 
               case 'CRIAR_PRODUTO':
                 const { id: _pId, criado_em: _pCr, ...prodLimpo } = payload.produto;
                 await produtosService.criar(true, prodLimpo);
                 break;
-                
               case 'ATUALIZAR_PRODUTO':
                 const { id: _upPId, criado_em: _upPCr, ...prodUp } = payload.produto;
                 await produtosService.atualizar(true, payload.id, prodUp);
@@ -197,27 +219,32 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             console.error(`SYNC ERRO [${action.type}]:`, syncError);
           }
       }
-      
       addToast('Sincronização concluída!', 'success');
 
     } catch (error) {
       console.error('Erro Geral Sync:', error);
-      addToast('Erro ao sincronizar dados.', 'error');
     } finally {
       setIsSyncing(false);
+      // LIBERA A TRAVA GLOBAL
+      isGlobalSyncingLocked = false;
     }
   };
 
   useEffect(() => {
-    if (!isOnline) {
-      hasSyncedSinceOnline.current = false;
-      return;
+    if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
     }
+    if (!isOnline) return;
     
-    if (isOnline && !hasSyncedSinceOnline.current) {
-        const timer = setTimeout(() => processSyncQueue(), 2000); 
-        return () => clearTimeout(timer);
-    }
+    // Timer com debounce
+    timeoutRef.current = setTimeout(() => {
+        processSyncQueue();
+    }, 2000);
+
+    return () => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
   }, [isOnline]); 
 
   return (

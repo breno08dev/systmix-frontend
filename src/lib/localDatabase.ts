@@ -1,12 +1,8 @@
 // src/lib/localDatabase.ts
 import Dexie, { Table } from 'dexie';
-// Mantendo suas importações originais
 import { Comanda, ItemComanda, Produto, Cliente, PagamentoInput } from '../types';
 
-// -------------------------------------------------------------------------
 // 1. TIPOS LOCAIS
-// -------------------------------------------------------------------------
-
 export interface Pagamento extends PagamentoInput {
   id: string;
   id_comanda: string;
@@ -17,32 +13,15 @@ export interface ComandaLocal extends Comanda {
   pagamentos: Pagamento[];
 }
 
-// ATUALIZADO: Adicionado campo 'tentativas' para controle do Sync
 export type PendingAction = {
   id?: number; 
-  type: 
-    | 'CRIAR_COMANDA' 
-    | 'ADICIONAR_ITEM' 
-    | 'FECHAR_COMANDA'
-    | 'ATUALIZAR_QTD_ITEM'
-    | 'REMOVER_ITEM'
-    | 'CRIAR_CLIENTE'
-    | 'ATUALIZAR_CLIENTE'
-    | 'DELETAR_CLIENTE'
-    | 'CRIAR_PRODUTO'
-    | 'ATUALIZAR_PRODUTO'
-    | 'DELETAR_PRODUTO'
-    | 'MOVIMENTACAO_CAIXA';
-
+  type: string;
   payload: any;
   criado_em: number;
-  tentativas?: number; // <--- NOVO: Evita loop infinito no Sync
+  tentativas?: number;
 };
 
-// -------------------------------------------------------------------------
 // 2. BANCO DE DADOS LOCAL (DEXIE)
-// -------------------------------------------------------------------------
-
 export class LocalDatabase extends Dexie {
   comandas!: Table<ComandaLocal, string>; 
   itensComanda!: Table<ItemComanda, string>;
@@ -53,7 +32,6 @@ export class LocalDatabase extends Dexie {
 
   constructor() {
     super('SystMixDatabase');
-    // Mantendo seu schema original. O campo 'tentativas' não precisa estar aqui para ser salvo.
     this.version(1).stores({
       comandas: 'id, numero, status', 
       itensComanda: 'id, id_comanda, id_produto',
@@ -69,20 +47,40 @@ export const db = new LocalDatabase();
 
 const createLocalId = () => `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-// -------------------------------------------------------------------------
-// 3. SERVIÇO (Lógica de Negócio Offline)
-// -------------------------------------------------------------------------
-
+// 3. SERVIÇO
 export const localDatabaseService = {
   
-  // --- GERENCIAMENTO DA FILA (ATUALIZADO) ---
-  
-  async addPendingAction(type: PendingAction['type'], payload: any): Promise<void> {
+  // --- PREVENÇÃO DE DUPLICIDADE (NOVO) ---
+  async addPendingAction(type: string, payload: any): Promise<void> {
+    // Verifica a última ação adicionada para evitar "clique duplo"
+    const lastAction = await db.pending_actions.orderBy('criado_em').last();
+    
+    // Se a última ação for igualzinha e ocorreu a menos de 2 segundos, ignoramos.
+    if (lastAction) {
+        const isSameType = lastAction.type === type;
+        const isRecent = (Date.now() - lastAction.criado_em) < 2000; // 2 segundos de tolerância
+        
+        // Comparação profunda simplificada para payload
+        const payloadStr = JSON.stringify(payload);
+        const lastPayloadStr = JSON.stringify(lastAction.payload);
+        
+        if (isSameType && isRecent && payloadStr === lastPayloadStr) {
+            console.warn(`OFFLINE: Ação duplicada [${type}] ignorada.`);
+            return;
+        }
+
+        // Prevenção extra para Fechar Comanda (mesmo ID)
+        if (type === 'FECHAR_COMANDA' && isSameType && payload.idComanda === lastAction.payload.idComanda) {
+             console.warn(`OFFLINE: Fechamento duplicado para comanda ${payload.idComanda} ignorado.`);
+             return;
+        }
+    }
+
     const newAction: Omit<PendingAction, 'id'> = { 
       type, 
       payload, 
       criado_em: Date.now(),
-      tentativas: 0 // <--- NOVO: Inicializa contador
+      tentativas: 0 
     };
     await db.pending_actions.add(newAction as PendingAction);
     console.log(`OFFLINE: Ação agendada [${type}]`, payload);
@@ -98,7 +96,7 @@ export const localDatabaseService = {
     await db.pending_actions.delete(id);
   },
 
-  // --- COMANDAS (MANTIDO ORIGINAL) ---
+  // --- COMANDAS ---
 
   async listarAbertas(): Promise<ComandaLocal[]> {
     const comandasLocais = await db.comandas.where('status').equals('aberta').toArray();
@@ -165,7 +163,16 @@ export const localDatabaseService = {
   },
 
   async fecharComanda(idComanda: string, pagamentosInput: PagamentoInput[]): Promise<void> {
-    await db.comandas.update(idComanda, { status: 'fechada', fechado_em: new Date().toISOString() });
+    // Verifica se JÁ está fechada localmente para nem iniciar o processo
+    const comanda = await db.comandas.get(idComanda);
+    if (comanda && comanda.status === 'fechada') {
+        console.warn("OFFLINE: Comanda já fechada localmente.");
+        return;
+    }
+
+    const dataFechamento = new Date().toISOString();
+
+    await db.comandas.update(idComanda, { status: 'fechada', fechado_em: dataFechamento });
     
     const pagamentosCompletos: Pagamento[] = [];
     
@@ -176,7 +183,7 @@ export const localDatabaseService = {
         id_comanda: idComanda,
         metodo: pag.metodo,
         valor: pag.valor,
-        data: new Date().toISOString()
+        data: dataFechamento
       };
       
       await db.pagamentos.add(novoPagamento);
@@ -184,7 +191,8 @@ export const localDatabaseService = {
     }
 
     await this.addPendingAction('FECHAR_COMANDA', { 
-      id_comanda: idComanda, 
+      idComanda, 
+      dataFechamento: dataFechamento, 
       pagamentos: pagamentosInput
     });
   },
@@ -214,63 +222,26 @@ export const localDatabaseService = {
     });
   },
 
-  // --- PRODUTOS (MANTIDO ORIGINAL) ---
-
-  async listarProdutos(): Promise<Produto[]> {
-    return db.produtos.toArray();
-  },
-  
-  async listarProdutosAtivos(): Promise<Produto[]> {
-    return db.produtos.filter(p => p.ativo === true).toArray();
-  },
-
+  // --- PRODUTOS, CLIENTES (Sem Alterações) ---
+  async listarProdutos(): Promise<Produto[]> { return db.produtos.toArray(); },
+  async listarProdutosAtivos(): Promise<Produto[]> { return db.produtos.filter(p => p.ativo === true).toArray(); },
   async criarProduto(produto: Omit<Produto, 'id' | 'criado_em'>): Promise<Produto> {
     const idLocal = createLocalId();
-    const novoProduto: Produto = {
-      ...produto,
-      id: idLocal,
-      criado_em: new Date().toISOString()
-    };
-    
+    const novoProduto = { ...produto, id: idLocal, criado_em: new Date().toISOString() };
     await db.produtos.add(novoProduto);
     await this.addPendingAction('CRIAR_PRODUTO', { produto: novoProduto });
-
     return novoProduto;
   },
-
-  async atualizarProduto(id: string, dados: Partial<Produto>): Promise<void> {
-    await db.produtos.update(id, dados);
-  },
-
-  async deletarProduto(id: string): Promise<void> {
-    await db.produtos.delete(id);
-  },
-
-  // --- CLIENTES (MANTIDO ORIGINAL) ---
-
-  async listarClientes(): Promise<Cliente[]> {
-    return db.clientes.toArray();
-  },
-
+  async atualizarProduto(id: string, dados: Partial<Produto>): Promise<void> { await db.produtos.update(id, dados); },
+  async deletarProduto(id: string): Promise<void> { await db.produtos.delete(id); },
+  async listarClientes(): Promise<Cliente[]> { return db.clientes.toArray(); },
   async criarCliente(cliente: Omit<Cliente, 'id' | 'criado_em'>): Promise<Cliente> {
     const idLocal = createLocalId();
-    const novoCliente: Cliente = {
-      ...cliente,
-      id: idLocal,
-      criado_em: new Date().toISOString()
-    };
-    
+    const novoCliente = { ...cliente, id: idLocal, criado_em: new Date().toISOString() };
     await db.clientes.add(novoCliente);
     await this.addPendingAction('CRIAR_CLIENTE', { cliente: novoCliente });
-
     return novoCliente;
   },
-
-  async atualizarCliente(id: string, dados: Partial<Cliente>): Promise<void> {
-    await db.clientes.update(id, dados);
-  },
-
-  async deletarCliente(id: string): Promise<void> {
-    await db.clientes.delete(id);
-  }
+  async atualizarCliente(id: string, dados: Partial<Cliente>): Promise<void> { await db.clientes.update(id, dados); },
+  async deletarCliente(id: string): Promise<void> { await db.clientes.delete(id); }
 };

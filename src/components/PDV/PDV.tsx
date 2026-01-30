@@ -41,7 +41,7 @@ export const PDV: React.FC = () => {
   }, [isOnline, isSyncing]); 
 
   const carregarDados = async () => {
-    setCarregando(true);
+    // Não ativa loading total para não piscar a tela, apenas atualiza dados
     try {
       const [comandasData, produtosData, clientesData] = await Promise.all([
         comandasService.listarAbertas(isOnline),
@@ -96,8 +96,10 @@ export const PDV: React.FC = () => {
   };
   
   const handleItemAtualizado = () => {
-     // Função opcional, pois o carregarDados no close já resolve.
-     // Se quiser atualizar a lista em tempo real enquanto o modal está aberto, chame carregarDados() aqui.
+     // ATUALIZAÇÃO DE ESTOQUE:
+     // Quando um item é adicionado/alterado no modal, recarregamos os produtos no pai
+     // para que o estoque diminua na lista visualmente.
+     carregarDados();
   };
   
   const calcularTotalComanda = (comanda: Comanda) => {

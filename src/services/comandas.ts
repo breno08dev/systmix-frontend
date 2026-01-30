@@ -18,7 +18,7 @@ export const comandasService = {
         
        const comandas = data || [];
 
-        // CACHE: Salva comandas, itens E CLIENTES para uso offline
+        // CACHE: Salva dados para offline
         if (comandas.length > 0) {
             const comandasLimpas = comandas.map(({ itens: _itens, cliente: _cliente, ...resto }) => resto);
             await db.comandas.bulkPut(comandasLimpas as any);
@@ -26,7 +26,6 @@ export const comandasService = {
             const todosItens = comandas.flatMap(c => c.itens || []);
             await db.itensComanda.bulkPut(todosItens as any);
             
-            // NOVO: Extrair e salvar clientes para garantir que existam offline
             const clientesEncontrados = comandas.map(c => c.cliente).filter(c => !!c);
             if (clientesEncontrados.length > 0) {
                  await db.clientes.bulkPut(clientesEncontrados as any);
@@ -57,7 +56,7 @@ export const comandasService = {
       .from('comandas')
       .select(`*, cliente:clientes(*), itens:itens_comanda(*, produto:produtos(*))`)
       .eq('id', id)
-      .single();
+      .maybeSingle(); // maybeSingle evita erro se ID não existir
     
     if (error) throw error;
     return data;
@@ -80,7 +79,7 @@ export const comandasService = {
       await localDatabaseService.addPendingAction('CRIAR_COMANDA', { 
         numero, 
         idCliente,
-        tempId: novaComanda.id 
+        idTemp: novaComanda.id 
       });
       return novaComanda;
     }
@@ -88,36 +87,96 @@ export const comandasService = {
 
   async adicionarItem(isOnline: boolean, idComanda: string, item: any): Promise<ItemComanda> {
     if (isOnline) {
-        // Verifica Estoque Online
+        // 1. Verifica Estoque Online
         const { data: produto } = await supabase.from('produtos').select('estoque').eq('id', item.id_produto).single();
         if (!produto || produto.estoque < item.quantidade) throw new Error("Estoque insuficiente (Online).");
 
-        const { data, error } = await supabase
-          .from('itens_comanda')
-          .insert([{ ...item, id_comanda: idComanda }])
-          .select(`*, produto:produtos(*)`)
-          .single();
+        // 2. LÓGICA DE AGRUPAMENTO (UPSERT)
+        // USO DE .maybeSingle() -> Retorna null em vez de erro 406 se não encontrar
+        const { data: itemExistente, error: erroBusca } = await supabase
+            .from('itens_comanda')
+            .select('*')
+            .eq('id_comanda', idComanda)
+            .eq('id_produto', item.id_produto)
+            .maybeSingle();
 
-        if (error) throw error;
+        if (erroBusca) throw erroBusca;
 
+        let itemFinal;
+
+        if (itemExistente) {
+            // SE EXISTE: Atualiza quantidade
+            const novaQuantidade = itemExistente.quantidade + item.quantidade;
+            const { data, error } = await supabase
+                .from('itens_comanda')
+                .update({ quantidade: novaQuantidade })
+                .eq('id', itemExistente.id)
+                .select(`*, produto:produtos(*)`)
+                .single();
+            
+            if (error) throw error;
+            itemFinal = data;
+            
+            await db.itensComanda.update(itemExistente.id, { quantidade: novaQuantidade });
+        } else {
+            // SE NÃO EXISTE: Cria novo
+            const { data, error } = await supabase
+              .from('itens_comanda')
+              .insert([{ ...item, id_comanda: idComanda }])
+              .select(`*, produto:produtos(*)`)
+              .single();
+
+            if (error) {
+                // Tratamento de Erro Fatal (Comanda não existe)
+                if (error.code === '23503') {
+                    throw new Error("COMANDA_NAO_ENCONTRADA_FATAL");
+                }
+                throw error;
+            }
+            itemFinal = data;
+            
+            await db.itensComanda.put(data); 
+        }
+
+        // 3. Baixa no Estoque
         await supabase.from('produtos').update({ estoque: produto.estoque - item.quantidade }).eq('id', item.id_produto);
-        await db.itensComanda.put(data); 
         
-        return data;
+        return itemFinal;
+
     } else {
+        // --- MODO OFFLINE ---
         const produtoLocal = await db.produtos.get(item.id_produto);
         if (produtoLocal && produtoLocal.estoque < item.quantidade) {
             throw new Error("Estoque insuficiente (Local).");
         }
 
-        const novoItem = await localDatabaseService.adicionarItem(idComanda, item);
-        
-        if (produtoLocal) {
-            await db.produtos.update(item.id_produto, { estoque: produtoLocal.estoque - item.quantidade });
-        }
+        const itemLocalExistente = await db.itensComanda
+            .where({ id_comanda: idComanda, id_produto: item.id_produto })
+            .first();
 
-        await localDatabaseService.addPendingAction('ADICIONAR_ITEM', { ...item, id_comanda: idComanda });
-        return novoItem;
+        if (itemLocalExistente) {
+            const novaQtd = itemLocalExistente.quantidade + item.quantidade;
+            await db.itensComanda.update(itemLocalExistente.id, { quantidade: novaQtd });
+            
+            await localDatabaseService.addPendingAction('ATUALIZAR_QTD_ITEM', { 
+                id_comanda: idComanda,
+                id_item: itemLocalExistente.id, 
+                novaQuantidade: novaQtd 
+            });
+
+            if (produtoLocal) {
+                await db.produtos.update(item.id_produto, { estoque: produtoLocal.estoque - item.quantidade });
+            }
+            
+            return { ...itemLocalExistente, quantidade: novaQtd };
+        } else {
+            const novoItem = await localDatabaseService.adicionarItem(idComanda, item);
+            
+            if (produtoLocal) {
+                await db.produtos.update(item.id_produto, { estoque: produtoLocal.estoque - item.quantidade });
+            }
+            return novoItem;
+        }
     }
   },
 
@@ -148,11 +207,28 @@ export const comandasService = {
 
   async atualizarQuantidadeItem(isOnline: boolean, _idComanda: string, idItem: string, novaQuantidade: number): Promise<void> {
      if (isOnline) {
-       await supabase.from('itens_comanda').update({ quantidade: novaQuantidade }).eq('id', idItem);
-       await db.itensComanda.update(idItem, { quantidade: novaQuantidade });
+       const { data: itemAtual } = await supabase.from('itens_comanda').select('quantidade, id_produto').eq('id', idItem).single();
+       
+       if (itemAtual) {
+           const diferenca = novaQuantidade - itemAtual.quantidade;
+           
+           await supabase.from('itens_comanda').update({ quantidade: novaQuantidade }).eq('id', idItem);
+           
+           if (diferenca !== 0) {
+              const { data: prod } = await supabase.from('produtos').select('estoque').eq('id', itemAtual.id_produto).single();
+              if (prod) {
+                  await supabase.from('produtos').update({ estoque: prod.estoque - diferenca }).eq('id', itemAtual.id_produto);
+              }
+           }
+           await db.itensComanda.update(idItem, { quantidade: novaQuantidade });
+       }
      } else {
        await localDatabaseService.atualizarQuantidadeItem(idItem, novaQuantidade);
-       await localDatabaseService.addPendingAction('ATUALIZAR_QTD_ITEM', { idItem, novaQuantidade });
+       await localDatabaseService.addPendingAction('ATUALIZAR_QTD_ITEM', { 
+           id_item: idItem, 
+           id_comanda: _idComanda, 
+           novaQuantidade 
+       });
      }
   },
 
@@ -168,6 +244,21 @@ export const comandasService = {
     const dataFinal = dataFechamentoOffline || new Date().toISOString();
 
     if (isOnline) {
+        // Uso de maybeSingle para evitar erro 406 se não existir
+        const { data: comandaAtual, error: erroBusca } = await supabase.from('comandas').select('status').eq('id', idComanda).maybeSingle();
+        
+        if (erroBusca) throw erroBusca;
+
+        // Se não achou comanda (null)
+        if (!comandaAtual) {
+             throw new Error("COMANDA_NAO_ENCONTRADA_FATAL");
+        }
+
+        if (comandaAtual.status === 'fechada') {
+             console.warn(`Comanda ${idComanda} já está fechada. Ignorando.`);
+             return; 
+        }
+
         const pagamentosFormatados = pagamentos.map(p => ({ 
             id_comanda: idComanda, 
             metodo: normalizarMetodo(p.metodo),
@@ -176,7 +267,13 @@ export const comandasService = {
         }));
 
         const { error: erroPag } = await supabase.from('pagamentos').insert(pagamentosFormatados);
-        if (erroPag) throw new Error("Erro ao registrar pagamento financeiro.");
+        if (erroPag) {
+            if (erroPag.code === '23505') {
+                 console.warn("Pagamentos já registrados, prosseguindo.");
+            } else {
+                 throw erroPag;
+            }
+        }
 
         const { error } = await supabase
           .from('comandas')

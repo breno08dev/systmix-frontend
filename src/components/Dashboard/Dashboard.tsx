@@ -45,7 +45,7 @@ export const Dashboard: React.FC = () => {
 
   const carregarDados = async () => {
     // 1. Verificação de segurança: Se não tem caixaAberto ou ele não tem data de abertura, zera e sai.
-    if (!caixaAberto || !caixaAberto.aberto_em) {
+    if (!caixaAberto || !caixaAberto.data_abertura) {
       setStats({ comandasAbertas: 0, totalProdutos: 0, totalClientes: 0, faturamentoDia: 0 });
       setComandasRecentes([]);
       return; 
@@ -55,7 +55,7 @@ export const Dashboard: React.FC = () => {
       // 2. CORREÇÃO CRÍTICA DE DATA:
       // O serviço espera 'YYYY-MM-DD'. O banco retorna ISO completo 'YYYY-MM-DDTHH:mm:ss...'
       // Pegamos apenas os 10 primeiros caracteres para evitar "Invalid time value" no serviço.
-      const dataInicioStr = String(caixaAberto.aberto_em).substring(0, 10);
+      const dataInicioStr = String(caixaAberto.data_abertura).substring(0, 10);
       const dataFimStr = new Date().toISOString().substring(0, 10);
 
       const [comandas, produtos, clientes, financeiro] = await Promise.all([

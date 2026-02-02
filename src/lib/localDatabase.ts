@@ -32,11 +32,11 @@ export class LocalDatabase extends Dexie {
 
   constructor() {
     super('SystMixDatabase');
-    this.version(1).stores({
+    this.version(2).stores({
       comandas: 'id, numero, status', 
       itensComanda: 'id, id_comanda, id_produto',
-      produtos: 'id, nome, ativo', 
-      clientes: 'id, nome, telefone',
+      produtos: 'id, nome, ativo, codigo_barras,descricao', 
+      clientes: 'id, nome, telefone, email',
       pagamentos: 'id, id_comanda',
       pending_actions: '++id, criado_em' 
     });
@@ -120,8 +120,15 @@ export const localDatabaseService = {
     return comandasLocais;
   },
 
-  async criarComanda(numero: number, idCliente?: string): Promise<ComandaLocal> {
+ async criarComanda(numero: number, idCliente?: string): Promise<ComandaLocal> {
     const idLocal = createLocalId();
+    
+    // 1. Busca os dados do cliente para exibir o nome na tela IMEDIATAMENTE
+    let clienteDados = undefined;
+    if (idCliente) {
+        clienteDados = await db.clientes.get(idCliente);
+    }
+
     const novaComanda: ComandaLocal = {
       id: idLocal,
       numero,
@@ -129,9 +136,12 @@ export const localDatabaseService = {
       status: 'aberta',
       criado_em: new Date().toISOString(),
       itens: [],
-      pagamentos: []
+      pagamentos: [],
+      // 2. Anexa o objeto cliente completo aqui
+      cliente: clienteDados 
     };
     
+    // Salva no banco (o Dexie salva o objeto 'cliente' junto se ele estiver na estrutura)
     await db.comandas.add(novaComanda); 
 
     await this.addPendingAction('CRIAR_COMANDA', { 
@@ -142,7 +152,7 @@ export const localDatabaseService = {
 
     return novaComanda;
   },
-
+  
   async adicionarItem(idComanda: string, item: Omit<ItemComanda, 'id' | 'id_comanda' | 'criado_em'>): Promise<ItemComanda> {
     const idLocal = createLocalId();
     const novoItem: ItemComanda = {

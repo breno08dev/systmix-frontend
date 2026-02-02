@@ -198,7 +198,7 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               case 'DELETAR_CLIENTE':
                  // ...logica cliente...
                  const delId = idMap[payload.id] || payload.id;
-                 if (!delId.toString().startsWith('local_')) await clientesService.deletar(true, delId);
+                 if (!delId.toString().startsWith('local_')) await clientesService.excluir(true, delId);
                 break;
 
               case 'CRIAR_PRODUTO':

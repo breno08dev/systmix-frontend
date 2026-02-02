@@ -44,7 +44,7 @@ export const CaixaModal: React.FC<CaixaModalProps> = ({ isOpen, onClose, tipo })
   };
 
   const isAbertura = tipo === 'abertura';
-  const saldoSistema = Number(caixaAberto?.saldo_atual || 0);
+  const saldoSistema = Number(caixaAberto?.valor_inicial || 0);
 
   const footer = (
     <>

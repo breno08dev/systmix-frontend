@@ -1,7 +1,7 @@
 // src/contexts/SyncContext.tsx
 import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
-import { localDatabaseService, db } from '../lib/localDatabase';
+import { localDatabaseService, db, PendingAction } from '../lib/localDatabase';
 import { useToast } from './ToastContext';
 import { comandasService } from '../services/comandas';
 import { clientesService } from '../services/clientes';
@@ -14,10 +14,39 @@ interface SyncContextData {
 
 const SyncContext = createContext<SyncContextData>({} as SyncContextData);
 
-// --- TRAVA GLOBAL (Fora do Componente) ---
-// Isso garante que apenas UM processo de sync rode na aplicação inteira,
-// independente de quantos Providers existam ou do StrictMode.
 let isGlobalSyncingLocked = false;
+
+// --- FUNÇÃO PARA OTIMIZAR A FILA (Fundir ações repetidas) ---
+const otimizarFila = (actions: PendingAction[]) => {
+    const optimized: PendingAction[] = [];
+    const updateMap = new Map<string, number>(); // id_item -> indice no array optimized
+
+    for (const action of actions) {
+        // Se for atualização de quantidade, tenta fundir com a anterior
+        if (action.type === 'ATUALIZAR_QTD_ITEM') {
+            const idItem = action.payload.id_item || action.payload.idItem;
+            
+            if (idItem && updateMap.has(idItem)) {
+                // Já existe uma atualização para esse item na fila, ATUALIZAMOS ela para a mais recente
+                const index = updateMap.get(idItem)!;
+                // Atualiza a quantidade da ação existente para a nova (mais recente)
+                optimized[index].payload.quantidade = action.payload.quantidade || action.payload.novaQuantidade;
+                optimized[index].payload.novaQuantidade = action.payload.quantidade || action.payload.novaQuantidade;
+                
+                // Também atualizamos o ID da ação original para marcar como processada depois
+                // (Opcional, mas mantém a referência)
+            } else {
+                // Nova atualização
+                const newLength = optimized.push(action);
+                updateMap.set(idItem, newLength - 1);
+            }
+        } else {
+            // Outras ações passam direto
+            optimized.push(action);
+        }
+    }
+    return optimized;
+};
 
 export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { isOnline } = useOnlineStatus();
@@ -26,40 +55,44 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const processSyncQueue = async () => {
-    // Verifica a trava global
-    if (isGlobalSyncingLocked) {
-        console.log('SYNC: Tentativa de execução paralela bloqueada pelo Global Lock.');
-        return;
-    }
+    if (isGlobalSyncingLocked) return;
 
     try {
-      // Ativa a trava global
       isGlobalSyncingLocked = true;
       setIsSyncing(true);
       
-      console.log('SYNC: Iniciando varredura (Global Lock Ativo)...'); 
-
-      // Pequeno delay para garantir estabilidade
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      const pendingActions = await localDatabaseService.getPendingActions();
+      // 1. Busca e Ordena por Prioridade
+      const rawActions = (await localDatabaseService.getPendingActions()).sort((a, b) => {
+        const priority = { 
+            'CRIAR_CLIENTE': 1, 'CRIAR_PRODUTO': 1, 
+            'CRIAR_COMANDA': 2, 'ADICIONAR_ITEM': 3,
+            'ATUALIZAR_QTD_ITEM': 4 
+        };
+        const pA = priority[a.type as keyof typeof priority] || 99;
+        const pB = priority[b.type as keyof typeof priority] || 99;
+        return pA - pB || a.criado_em - b.criado_em;
+      });
       
-      if (pendingActions.length === 0) {
-        return;
-      }
+      if (rawActions.length === 0) return;
 
-      addToast(`Sincronizando ${pendingActions.length} ações pendentes...`, 'error');
+      // 2. Otimiza a fila (Remove atualizações redundantes)
+      const pendingActions = otimizarFila(rawActions);
+
+      addToast(`Sincronizando ${pendingActions.length} ações...`, 'success');
 
       const idMap: Record<string, string> = {};
-      const processedThisBatch = new Set<number>();
+      // Set para não processar a mesma ação (pelo ID do banco local) duas vezes se houver duplicidade
+      const processedActionIds = new Set<number>();
 
       for (const action of pendingActions) {
-          // Proteção contra duplicidade de ID no mesmo lote
-          if (action.id && processedThisBatch.has(action.id)) continue;
-          if (action.id) processedThisBatch.add(action.id);
+          if (action.id && processedActionIds.has(action.id)) continue;
+          if (action.id) processedActionIds.add(action.id);
 
           try {
             let payload = JSON.parse(JSON.stringify(action.payload));
+            let shouldRemoveAction = true; 
 
             // --- TRADUÇÃO DE IDS ---
             if (payload.id_comanda && idMap[payload.id_comanda]) payload.id_comanda = idMap[payload.id_comanda];
@@ -68,29 +101,52 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (payload.id_cliente && idMap[payload.id_cliente]) payload.id_cliente = idMap[payload.id_cliente];
             if (payload.idItem && idMap[payload.idItem]) payload.idItem = idMap[payload.idItem];
             if (payload.id_item && idMap[payload.id_item]) payload.id_item = idMap[payload.id_item];
+            if (payload.id_produto && idMap[payload.id_produto]) payload.id_produto = idMap[payload.id_produto];
 
             console.log(`SYNC: Executando ${action.type}`, payload);
-            
-            let shouldRemoveAction = true; 
 
             switch (action.type) {
               case 'CRIAR_CLIENTE':
                 try {
-                    const { id: _idCli, criado_em: _cEmCli, ...clienteLimpo } = payload.cliente;
-                    const novoCliente: any = await clientesService.criar(true, clienteLimpo);
-                    const tempIdCliente = payload.tempId || payload.idTemp;
-                    if (novoCliente && tempIdCliente) {
-                        idMap[tempIdCliente] = novoCliente.id;
-                        await db.clientes.delete(tempIdCliente); 
+                    const { id: tempIdCli, criado_em: _x, ...clienteLimpo } = payload.cliente;
+                    if (tempIdCli) {
+                        const existeLocal = await db.clientes.get(tempIdCli);
+                        if (!existeLocal) break; 
                     }
-                } catch (err: any) {
+                    const novoCliente: any = await clientesService.criar(true, clienteLimpo);
+                    if (novoCliente && tempIdCli) {
+                        idMap[tempIdCli] = novoCliente.id;
+                        await db.clientes.delete(tempIdCli); 
+                    }
+                } catch (err) {
                     console.error("Erro sync cliente:", err);
                     throw err; 
                 }
                 break;
 
+              case 'CRIAR_PRODUTO':
+                try {
+                    const { id: tempIdProd, criado_em: _y, ...prodLimpo } = payload.produto;
+                    if (tempIdProd) {
+                        const existeLocal = await db.produtos.get(tempIdProd);
+                        if (!existeLocal) break;
+                    }
+                    const novoProd = await produtosService.criar(true, prodLimpo);
+                    if (novoProd && tempIdProd) {
+                        idMap[tempIdProd] = novoProd.id;
+                        await db.produtos.delete(tempIdProd);
+                    }
+                } catch (err) {
+                    console.error("Erro sync produto:", err);
+                    throw err;
+                }
+                break;
+
               case 'CRIAR_COMANDA':
-                const idClienteFinal = idMap[payload.idCliente] || (payload.idCliente?.toString().startsWith('local_') ? null : payload.idCliente);
+                // CORREÇÃO: Aceita payload.idCliente OU payload.id_cliente (padrão do banco local)
+                const rawIdCliente = payload.idCliente || payload.id_cliente;
+                const idClienteFinal = idMap[rawIdCliente] || (rawIdCliente?.toString().startsWith('local_') ? null : rawIdCliente);
+                
                 const tempIdComanda = payload.tempId || payload.idTemp; 
 
                 try {
@@ -105,6 +161,7 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         const { data: existente } = await supabase.from('comandas').select('*').eq('numero', payload.numero).eq('status', 'aberta').maybeSingle();
                         if (existente) {
                             if (tempIdComanda) idMap[tempIdComanda] = existente.id;
+                            // Verifica se precisa vincular cliente
                             if (!existente.id_cliente && idClienteFinal && !idClienteFinal.toString().startsWith('local_')) {
                                 await supabase.from('comandas').update({ id_cliente: idClienteFinal }).eq('id', existente.id);
                             }
@@ -119,36 +176,42 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 break;
 
               case 'ADICIONAR_ITEM':
-                const idComandaReal = payload.id_comanda || payload.idComanda;
+                const idComandaReal = idMap[payload.id_comanda] || payload.id_comanda || idMap[payload.idComanda] || payload.idComanda;
+                const idProdutoReal = idMap[payload.id_produto] || payload.id_produto;
+
+                if (idProdutoReal && idProdutoReal.toString().startsWith('local_')) {
+                    console.warn(`SYNC: Item adiado. Produto ${idProdutoReal} ainda não sincronizou.`);
+                    shouldRemoveAction = false; 
+                    break;
+                }
+
                 if (idComandaReal && !idComandaReal.toString().startsWith('local_')) {
                     const itemSanitizado = {
-                        id_produto: payload.id_produto,
+                        id_produto: idProdutoReal,
                         quantidade: Number(payload.quantidade),
                         valor_unit: Number(payload.valor_unit)
                     };
                     try {
                         const itemSalvo = await comandasService.adicionarItem(true, idComandaReal, itemSanitizado);
-                        if (payload.id && payload.id.toString().startsWith('local_')) {
-                            idMap[payload.id] = itemSalvo.id;
-                            await db.itensComanda.delete(payload.id);
+                        
+                        const tempIdItem = payload.id;
+                        if (tempIdItem && tempIdItem.toString().startsWith('local_')) {
+                            // 🔥 CORREÇÃO IMPORTANTE: Mapear o ID do item
+                            idMap[tempIdItem] = itemSalvo.id;
+                            await db.itensComanda.delete(tempIdItem);
                         }
                     } catch (err: any) {
-                        if (err.message === "COMANDA_NAO_ENCONTRADA_FATAL" || err.code === '23503') {
-                            shouldRemoveAction = true;
-                        } else {
-                            throw err;
-                        }
+                         if (err.message === "COMANDA_NAO_ENCONTRADA_FATAL" || err.code === '23503') shouldRemoveAction = true;
+                         else throw err;
                     }
-                } else {
-                    shouldRemoveAction = false; 
-                }
+                } else shouldRemoveAction = false; 
                 break;
                 
               case 'REMOVER_ITEM':
                 try {
                     const idIR = idMap[payload.idItem] || payload.idItem;
                     const idCR = idMap[payload.idComanda] || payload.idComanda;
-                    if (!idIR.toString().startsWith('local_')) {
+                    if (idIR && !idIR.toString().startsWith('local_') && idCR && !idCR.toString().startsWith('local_')) {
                        await comandasService.removerItem(true, idCR, idIR);
                     }
                 } catch (e) { console.warn("Item ja removido", e); }
@@ -156,63 +219,98 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
               case 'ATUALIZAR_QTD_ITEM':
                 const idItemAtualizar = idMap[payload.id_item] || payload.id_item;
+                // 🔥 CORREÇÃO: Aceita 'quantidade' OU 'novaQuantidade'
+                const qtdFinal = payload.quantidade || payload.novaQuantidade;
+
                 if (idItemAtualizar && !idItemAtualizar.toString().startsWith('local_')) {
-                    await comandasService.atualizarQuantidadeItem(true, "", idItemAtualizar, payload.novaQuantidade);
+                    await comandasService.atualizarQuantidadeItem(true, "", idItemAtualizar, Number(qtdFinal));
                 } else {
-                    console.warn(`SYNC: Update QTD adiado (Item local).`);
+                    shouldRemoveAction = false; 
                 }
                 break;
 
               case 'FECHAR_COMANDA':
-                 const idComandaFechar = payload.idComanda || payload.id_comanda;
+                 const idComandaFechar = idMap[payload.idComanda] || payload.idComanda || idMap[payload.id_comanda] || payload.id_comanda;
                  if (idComandaFechar && !idComandaFechar.toString().startsWith('local_')) {
                     try {
                         await comandasService.fecharComanda(true, idComandaFechar, payload.pagamentos, payload.dataFechamento);
                     } catch (err: any) {
-                        if (err.message === "COMANDA_NAO_ENCONTRADA_FATAL" || err.code === '23503' || (err as any).status === 409) {
-                            shouldRemoveAction = true;
-                        } else {
-                            throw err;
-                        }
+                         if (err.message === "COMANDA_NAO_ENCONTRADA_FATAL" || err.code === '23503' || (err as any).status === 409) shouldRemoveAction = true;
+                         else throw err;
                     }
-                 } else {
-                    shouldRemoveAction = false;
-                 }
+                 } else shouldRemoveAction = false;
                 break;
-              
-              case 'MOVIMENTACAO_CAIXA':
-                 if (payload.idCaixa && !payload.idCaixa.startsWith('local_')) {
-                    await supabase.from('caixas').update({ saldo_atual: payload.novoSaldo }).eq('id', payload.idCaixa);
-                 }
-                 break;
-
+                
               case 'ATUALIZAR_CLIENTE':
-                 // ...logica cliente...
                  const realIdCli = idMap[payload.id] || payload.id;
-                 if (!realIdCli.toString().startsWith('local_')) {
-                    const { id: _upId, criado_em: _upCr, ...dadosCli } = payload.cliente;
+                 if (realIdCli && !realIdCli.toString().startsWith('local_')) {
+                    const { id: _ig, criado_em: _ig2, ...dadosCli } = payload.cliente;
                     await clientesService.atualizar(true, realIdCli, dadosCli);
                  } else shouldRemoveAction = false;
                 break;
 
               case 'DELETAR_CLIENTE':
-                 // ...logica cliente...
                  const delId = idMap[payload.id] || payload.id;
-                 if (!delId.toString().startsWith('local_')) await clientesService.excluir(true, delId);
+                 if (delId && !delId.toString().startsWith('local_')) await clientesService.excluir(true, delId);
                 break;
 
-              case 'CRIAR_PRODUTO':
-                const { id: _pId, criado_em: _pCr, ...prodLimpo } = payload.produto;
-                await produtosService.criar(true, prodLimpo);
+               case 'ATUALIZAR_PRODUTO':
+                const idProdUp = idMap[payload.id] || payload.id;
+                if (idProdUp && !idProdUp.toString().startsWith('local_')) {
+                    const { id: _upPId, criado_em: _upPCr, ...prodUp } = payload.produto;
+                    await produtosService.atualizar(true, idProdUp, prodUp);
+                } else shouldRemoveAction = false;
                 break;
-              case 'ATUALIZAR_PRODUTO':
-                const { id: _upPId, criado_em: _upPCr, ...prodUp } = payload.produto;
-                await produtosService.atualizar(true, payload.id, prodUp);
+                
+                case 'MOVIMENTACAO_CAIXA':
+                 if (payload.idCaixa && !payload.idCaixa.startsWith('local_')) {
+                    await supabase.from('caixas').update({ saldo_atual: payload.novoSaldo }).eq('id', payload.idCaixa);
+                 }
+                 break;
+                 
+                 case 'DELETAR_COMANDA':
+                 const idComandaDel = idMap[payload.id] || payload.id;
+                 if (idComandaDel && !idComandaDel.toString().startsWith('local_')) {
+                     await comandasService.excluir(true, idComandaDel);
+                 }
                 break;
             }
 
+            // Remove a ação do banco local se foi processada
+            // Se foi otimizada (ex: 10 atualizações viraram 1), todas as originais devem ser removidas
+            // A nossa lógica percorre a lista otimizada, mas precisamos limpar o lixo.
+            // Para simplificar: Removemos a ação atual. Se houver outras ações originais que foram engolidas
+            // pela otimização, elas serão removidas na próxima passada (já que não estarão na lista optimized mas estarão no banco?)
+            // NÃO. Precisamos limpar as ações que foram "comprimidas".
+            
+            // SIMPLIFICAÇÃO: Removemos pelo ID da ação que acabamos de rodar.
+            // As ações intermediárias (que foram puladas na otimização) vão ficar no banco?
+            // Sim, isso é um problema da otimização visual.
+            // CORREÇÃO: Vamos limpar TODAS as ações raw que compõem esta ação otimizada?
+            // Para não complicar: O loop roda nas "optimized".
+            // Vamos deletar do banco apenas se shouldRemoveAction.
+            
             if (shouldRemoveAction && action.id) {
                 await localDatabaseService.removePendingAction(action.id);
+            }
+            
+            // LIMPEZA DE AÇÕES REDUNDANTES (HACK SEGURO)
+            // Se processamos uma atualização de quantidade com sucesso, podemos deletar TODAS as
+            // atualizações de quantidade anteriores para este mesmo item que tenham ID menor.
+            if (action.type === 'ATUALIZAR_QTD_ITEM' && shouldRemoveAction) {
+                const idItem = payload.id_item || payload.idItem;
+                // Deleta todas as ações de update deste item que sejam mais antigas que a atual
+                const allActions = await db.pending_actions
+                    .where('type').equals('ATUALIZAR_QTD_ITEM')
+                    .and(a => {
+                        const p = a.payload;
+                        const tId = p.id_item || p.idItem;
+                        return tId === idItem && a.id! <= action.id!;
+                    }).toArray();
+                    
+                 for (const oldAction of allActions) {
+                     if (oldAction.id) await localDatabaseService.removePendingAction(oldAction.id);
+                 }
             }
             
           } catch (syncError: any) {
@@ -225,7 +323,6 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.error('Erro Geral Sync:', error);
     } finally {
       setIsSyncing(false);
-      // LIBERA A TRAVA GLOBAL
       isGlobalSyncingLocked = false;
     }
   };
@@ -237,7 +334,6 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     if (!isOnline) return;
     
-    // Timer com debounce
     timeoutRef.current = setTimeout(() => {
         processSyncQueue();
     }, 2000);

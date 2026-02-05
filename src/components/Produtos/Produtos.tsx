@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit, Trash2, Tag } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Tag, Lock, Unlock } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
 import { Produto } from '../../types';
 import ProdutoModal from './ProdutoModal';
@@ -8,7 +8,16 @@ import { useToast } from '../../contexts/ToastContext';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
 
+// --- CONFIGURAÇÃO DA SENHA ---
+const SENHA_MESTRA = '1234'; 
+
 export const Produtos: React.FC = () => {
+  // --- ESTADOS DE SEGURANÇA ---
+  const [acessoLiberado, setAcessoLiberado] = useState(false);
+  const [senhaInput, setSenhaInput] = useState('');
+  const [erroSenha, setErroSenha] = useState(false);
+
+  // --- ESTADOS DO COMPONENTE ---
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [termoBusca, setTermoBusca] = useState('');
   const [loading, setLoading] = useState(true);
@@ -21,9 +30,25 @@ export const Produtos: React.FC = () => {
   const { addToast } = useToast();
   const { isOnline } = useOnlineStatus();
 
+  // Carrega produtos apenas se o acesso estiver liberado
   useEffect(() => {
-    carregarProdutos();
-  }, [isOnline]);
+    if (acessoLiberado) {
+      carregarProdutos();
+    }
+  }, [isOnline, acessoLiberado]);
+
+  const handleVerificarSenha = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (senhaInput === SENHA_MESTRA) {
+      setAcessoLiberado(true);
+      setErroSenha(false);
+      addToast('Acesso autorizado!', 'success');
+    } else {
+      setErroSenha(true);
+      setSenhaInput('');
+      addToast('Senha incorreta.', 'error');
+    }
+  };
 
   const carregarProdutos = async () => {
     setLoading(true);
@@ -50,7 +75,8 @@ export const Produtos: React.FC = () => {
   const handleDeletarProduto = async () => {
     if (!produtoParaDeletar) return;
     try {
-      setProdutos(prev => prev.filter(p => p.id !== produtoParaDeletar)); // Mock visual se não tiver delete no service
+      await produtosService.excluir(isOnline, produtoParaDeletar);
+      setProdutos(prev => prev.filter(p => p.id !== produtoParaDeletar)); 
       addToast('Produto removido com sucesso!', 'success');
     } catch (error) {
       addToast('Erro ao remover produto.', 'error');
@@ -59,11 +85,67 @@ export const Produtos: React.FC = () => {
     }
   };
 
-  const produtosFiltrados = produtos.filter(p => 
-    p.nome.toLowerCase().includes(termoBusca.toLowerCase()) ||
-    (p.categoria?.nome && p.categoria.nome.toLowerCase().includes(termoBusca.toLowerCase()))
-  );
+  // --- CORREÇÃO DO FILTRO (Resolve o erro do TypeScript) ---
+  const produtosFiltrados = produtos.filter(p => {
+    const termo = termoBusca.toLowerCase();
+    const nomeProduto = p.nome.toLowerCase();
+    
+    // Verifica se categoria é string ou objeto antes de pegar o nome
+    let nomeCategoria = '';
+    if (typeof p.categoria === 'string') {
+        nomeCategoria = p.categoria.toLowerCase();
+    } else if (p.categoria?.nome) {
+        nomeCategoria = p.categoria.nome.toLowerCase();
+    }
 
+    return nomeProduto.includes(termo) || nomeCategoria.includes(termo);
+  });
+
+  // --- TELA DE BLOQUEIO ---
+  if (!acessoLiberado) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[500px] p-6">
+        <div className="bg-white p-8 rounded-2xl shadow-lg border border-slate-200 max-w-md w-full text-center">
+          <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Lock className="text-indigo-600 w-8 h-8" />
+          </div>
+          
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">Acesso Restrito</h2>
+          <p className="text-slate-500 mb-6">Esta área movimenta o estoque. Digite a senha de segurança para continuar.</p>
+          
+          <form onSubmit={handleVerificarSenha} className="space-y-4">
+            <div>
+              <input
+                type="password"
+                value={senhaInput}
+                onChange={(e) => {
+                    setSenhaInput(e.target.value);
+                    setErroSenha(false);
+                }}
+                placeholder="Senha de acesso"
+                className={`w-full px-4 py-3 border rounded-xl text-center text-lg tracking-widest focus:outline-none focus:ring-2 transition-all ${
+                  erroSenha 
+                    ? 'border-red-300 focus:ring-red-200 bg-red-50 text-red-900' 
+                    : 'border-slate-200 focus:ring-indigo-200 focus:border-indigo-500'
+                }`}
+                autoFocus
+              />
+            </div>
+            
+            <button
+              type="submit"
+              className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-md hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2"
+            >
+              <Unlock size={20} />
+              Liberar Acesso
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // --- CONTEÚDO PRINCIPAL ---
   return (
     <div className="p-8 max-w-[1600px] mx-auto">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -125,13 +207,13 @@ export const Produtos: React.FC = () => {
                         produtosFiltrados.map(produto => (
                             <tr key={produto.id} className="hover:bg-slate-50/50 transition-colors group">
                                 <td className="px-6 py-4 font-medium text-slate-900">
-                                    {/* ÍCONE DE CAIXA REMOVIDO DAQUI */}
                                     {produto.nome}
                                 </td>
                                 <td className="px-6 py-4">
+                                    {/* CORREÇÃO NA EXIBIÇÃO: Verifica se é string ou objeto */}
                                     {produto.categoria ? (
                                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
-                                            {produto.categoria.nome}
+                                            {typeof produto.categoria === 'string' ? produto.categoria : produto.categoria.nome}
                                         </span>
                                     ) : (
                                         <span className="text-slate-400 italic">Sem categoria</span>

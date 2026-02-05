@@ -4,14 +4,18 @@
   "version": "0.1.0",
   "type": "module",
   "main": "dist-electron/main.js",
+  "description": "Sistema PDV para Bares e Restaurantes",
+  "author": "SystMix",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build && electron-builder",
+    "build:skip": "vite build && electron-builder",
     "pack": "electron-builder",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "db:types": "npx supabase gen types typescript --project-id \"lxmbcxtvpyfargjqcqfr\" --schema public > src/types/database.types.ts"
+    "db:types": "npx supabase gen types typescript --project-id \"lxmbcxtvpyfargjqcqfr\" --schema public > src/types/database.types.ts",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.81.1",
@@ -35,7 +39,6 @@
     "autoprefixer": "^10.4.18",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.3",
-    "electron-rebuild": "^3.2.9",
     "eslint": "^9.9.1",
     "eslint-plugin-react-hooks": "^5.1.0-rc.0",
     "eslint-plugin-react-refresh": "^0.4.11",
@@ -52,18 +55,24 @@
   "build": {
     "appId": "com.systmix.app",
     "productName": "ConectNew",
-    "icon": "favicon.conect.png",
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "favicon.conect.png"
-    ],
+    "copyright": "Copyright © 2026 ConectNew",
     "directories": {
       "output": "release"
     },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
     "win": {
       "target": "nsis",
-      "icon": "public/icon.ico"
+      "icon": "public/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ConectNew"
     },
     "mac": {
       "target": "dmg"

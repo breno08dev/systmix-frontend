@@ -1,3 +1,4 @@
+// src/components/Relatorios/Relatorios.tsx
 import React, { useState, useEffect } from 'react';
 import { 
   BarChart3, 
@@ -7,7 +8,6 @@ import {
   QrCode, 
   Banknote, 
   TrendingUp, 
-  ArrowUpRight,
   Loader2,
   RefreshCcw,
   History,
@@ -31,7 +31,7 @@ export const Relatorios: React.FC = () => {
   const [resumoDia, setResumoDia] = useState<ResumoFinanceiro>(resumoZerado);
   const [resumoOntem, setResumoOntem] = useState<ResumoFinanceiro>(resumoZerado);
   const [resumoSemana, setResumoSemana] = useState<ResumoFinanceiro>(resumoZerado);
-  const [resumoMes, setResumoMes] = useState<ResumoFinanceiro>(resumoZerado);
+  const [resumo30Dias, setResumo30Dias] = useState<ResumoFinanceiro>(resumoZerado); // Renomeado para clareza
 
   const { isOnline } = useOnlineStatus();
   const { addToast } = useToast();
@@ -44,7 +44,7 @@ export const Relatorios: React.FC = () => {
     setLoading(true);
     try {
       // 1. Definição das datas
-      const hoje = dataFiltro;
+      const hoje = dataFiltro; // Data selecionada no input (padrão é hoje)
       
       const ontemObj = new Date(); 
       ontemObj.setDate(ontemObj.getDate() - 1);
@@ -54,22 +54,24 @@ export const Relatorios: React.FC = () => {
       semanaObj.setDate(semanaObj.getDate() - 7);
       const semanaInicio = semanaObj.toISOString().split('T')[0];
 
-      const now = new Date();
-      const mesInicio = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-      const mesFim = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+      // CORREÇÃO: Últimos 30 dias em vez de "Mês Atual" (que reseta dia 1)
+      const trintaDiasObj = new Date();
+      trintaDiasObj.setDate(trintaDiasObj.getDate() - 30);
+      const trintaDiasInicio = trintaDiasObj.toISOString().split('T')[0];
 
       // 2. Busca tudo em paralelo para ser rápido
-      const [dadosHoje, dadosOntem, dadosSemana, dadosMes] = await Promise.all([
+      // Nota: Usamos 'hoje' como data final para todos os períodos acumulativos
+      const [dadosHoje, dadosOntem, dadosSemana, dados30Dias] = await Promise.all([
         relatoriosService.buscarResumoFinanceiro(isOnline, hoje, hoje),
         relatoriosService.buscarResumoFinanceiro(isOnline, ontem, ontem),
         relatoriosService.buscarResumoFinanceiro(isOnline, semanaInicio, hoje),
-        relatoriosService.buscarResumoFinanceiro(isOnline, mesInicio, mesFim)
+        relatoriosService.buscarResumoFinanceiro(isOnline, trintaDiasInicio, hoje)
       ]);
 
       setResumoDia(dadosHoje);
       setResumoOntem(dadosOntem);
       setResumoSemana(dadosSemana);
-      setResumoMes(dadosMes);
+      setResumo30Dias(dados30Dias);
 
     } catch (error) {
       console.error(error);
@@ -78,7 +80,7 @@ export const Relatorios: React.FC = () => {
       setLoading(false);
     }
   };
-
+  
   const BRL = (valor: number) => 
     new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor);
 
@@ -123,7 +125,7 @@ export const Relatorios: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* 1. HERO CARD - FATURAMENTO DO DIA */}
+          {/* 1. HERO CARD - FATURAMENTO DO DIA SELECIONADO */}
           <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-3xl p-8 text-white shadow-xl shadow-indigo-500/20 relative overflow-hidden">
              <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div>
@@ -152,7 +154,7 @@ export const Relatorios: React.FC = () => {
              <div className="absolute -left-10 -top-20 w-64 h-64 bg-indigo-500/30 rounded-full blur-3xl pointer-events-none"></div>
           </div>
 
-          {/* 2. DETALHAMENTO POR MÉTODO (SEM PORCENTAGEM) */}
+          {/* 2. DETALHAMENTO POR MÉTODO (DO DIA SELECIONADO) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             
             {/* Dinheiro */}
@@ -189,7 +191,7 @@ export const Relatorios: React.FC = () => {
             </div>
           </div>
 
-          {/* 3. HISTÓRICO E COMPARATIVOS (NOVA SEÇÃO) */}
+          {/* 3. HISTÓRICO E COMPARATIVOS */}
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mt-4">
             <History className="text-indigo-600" />
             Histórico de Vendas
@@ -227,18 +229,18 @@ export const Relatorios: React.FC = () => {
                 </div>
             </div>
 
-            {/* Mês Atual */}
+            {/* Últimos 30 Dias (Corrigido para não mostrar menos que 7 dias) */}
             <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 flex flex-col justify-between">
                 <div className="flex justify-between items-start mb-4">
                     <div className="p-3 bg-white rounded-lg shadow-sm text-emerald-600">
                         <Calendar size={20} />
                     </div>
-                    <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded">Mensal</span>
+                    <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded">30 Dias</span>
                 </div>
                 <div>
-                    <p className="text-slate-500 font-medium text-sm">Vendas do Mês</p>
-                    <h3 className="text-2xl font-bold text-slate-800 mt-1">{BRL(resumoMes.totalGeral)}</h3>
-                    <p className="text-xs text-slate-400 mt-2">{resumoMes.qtdVendas} vendas este mês</p>
+                    <p className="text-slate-500 font-medium text-sm">Últimos 30 Dias</p>
+                    <h3 className="text-2xl font-bold text-slate-800 mt-1">{BRL(resumo30Dias.totalGeral)}</h3>
+                    <p className="text-xs text-slate-400 mt-2">{resumo30Dias.qtdVendas} vendas realizadas</p>
                 </div>
             </div>
 

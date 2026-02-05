@@ -3,14 +3,11 @@ import { supabase } from '../lib/supabaseClient';
 import { Produto } from '../types';
 import { db, localDatabaseService } from '../lib/localDatabase';
 
-// Normaliza para evitar erros de 'possibly null' e conflito de categoria
 const normalizarProduto = (p: any): Produto => ({
     ...p,
-    // Garante números válidos
     preco: Number(p.preco ?? 0),
     estoque: Number(p.estoque ?? 0),
     ativo: p.ativo ?? true,
-    // Aceita tanto a string do banco antigo quanto o objeto da nova relação
     categoria: p.categoria || 'Geral' 
 });
 
@@ -19,14 +16,12 @@ export const produtosService = {
   async listarAtivos(isOnline: boolean): Promise<Produto[]> {
     if (isOnline) {
       try {
-        // Tenta buscar com relação, se falhar o banco pode estar no formato antigo (texto)
         const { data, error } = await supabase
           .from('produtos')
           .select('*, categoria:categorias(*)') 
           .eq('ativo', true)
           .order('nome', { ascending: true });
 
-        // Se der erro no select (ex: tabela categorias não existe), tenta select simples
         if (error) {
              console.warn("Tentando fallback de produtos sem join:", error.message);
              const { data: dataSimples, error: errorSimples } = await supabase
@@ -43,7 +38,6 @@ export const produtosService = {
         
         const produtos = (data || []).map(normalizarProduto);
 
-        // Cache Offline
         if (produtos.length > 0) {
             await db.produtos.bulkPut(produtos);
         }
@@ -59,7 +53,6 @@ export const produtosService = {
   },
 
   async criar(isOnline: boolean, produto: any): Promise<Produto> {
-    // CORREÇÃO: Adicionado 'categoria' ao payload para satisfazer o tipo Produto
     const payload = {
         nome: produto.nome.trim(),
         descricao: produto.descricao,
@@ -69,7 +62,7 @@ export const produtosService = {
         imagem_url: produto.imagem_url,
         id_categoria: (produto.id_categoria && produto.id_categoria !== "") ? produto.id_categoria : null,
         ativo: true,
-        categoria: produto.categoria || 'Geral' // <--- OBRIGATÓRIO AGORA
+        categoria: produto.categoria || 'Geral'
     };
 
     if (isOnline) {
@@ -80,9 +73,8 @@ export const produtosService = {
         await db.produtos.put(novoProd);
         return novoProd;
     } else {
-        // Agora o payload satisfaz o tipo Omit<Produto, 'id'> esperado aqui
+        // CORREÇÃO: Removido o addPendingAction daqui pois o localDatabaseService já adiciona.
         const novoProduto = await localDatabaseService.criarProduto(payload as any);
-        await localDatabaseService.addPendingAction('CRIAR_PRODUTO', { produto: payload });
         return novoProduto;
     }
   },
@@ -97,15 +89,15 @@ export const produtosService = {
         imagem_url: produto.imagem_url,
         id_categoria: (produto.id_categoria && produto.id_categoria !== "") ? produto.id_categoria : null,
         ativo: produto.ativo,
-        categoria: produto.categoria || 'Geral' // <--- OBRIGATÓRIO AGORA
+        categoria: produto.categoria || 'Geral'
     };
 
     if (isOnline) {
         const { error } = await supabase.from('produtos').update(payload).eq('id', id);
         if (error) throw error;
-        
         await db.produtos.update(id, payload);
     } else {
+        // Atualização não tem wrapper automático no localDatabaseService para adicionar ação, então mantemos aqui.
         await localDatabaseService.atualizarProduto(id, payload);
         await localDatabaseService.addPendingAction('ATUALIZAR_PRODUTO', { id, produto: payload });
     }

@@ -32,13 +32,16 @@ export class LocalDatabase extends Dexie {
 
   constructor() {
     super('SystMixDatabase');
-    this.version(2).stores({
+    
+    // 🔥 VERSÃO 3: Adicionado índice 'type' em pending_actions 🔥
+    this.version(3).stores({
       comandas: 'id, numero, status', 
       itensComanda: 'id, id_comanda, id_produto',
       produtos: 'id, nome, ativo, codigo_barras,descricao', 
       clientes: 'id, nome, telefone, email',
       pagamentos: 'id, id_comanda',
-      pending_actions: '++id, criado_em' 
+      // ADICIONADO ', type' AQUI PARA PERMITIR BUSCAS
+      pending_actions: '++id, type, criado_em' 
     });
   }
 }
@@ -50,17 +53,13 @@ const createLocalId = () => `local_${Date.now()}_${Math.random().toString(36).su
 // 3. SERVIÇO
 export const localDatabaseService = {
   
-  // --- PREVENÇÃO DE DUPLICIDADE (NOVO) ---
   async addPendingAction(type: string, payload: any): Promise<void> {
-    // Verifica a última ação adicionada para evitar "clique duplo"
     const lastAction = await db.pending_actions.orderBy('criado_em').last();
     
-    // Se a última ação for igualzinha e ocorreu a menos de 2 segundos, ignoramos.
     if (lastAction) {
         const isSameType = lastAction.type === type;
-        const isRecent = (Date.now() - lastAction.criado_em) < 2000; // 2 segundos de tolerância
+        const isRecent = (Date.now() - lastAction.criado_em) < 2000; 
         
-        // Comparação profunda simplificada para payload
         const payloadStr = JSON.stringify(payload);
         const lastPayloadStr = JSON.stringify(lastAction.payload);
         
@@ -69,7 +68,6 @@ export const localDatabaseService = {
             return;
         }
 
-        // Prevenção extra para Fechar Comanda (mesmo ID)
         if (type === 'FECHAR_COMANDA' && isSameType && payload.idComanda === lastAction.payload.idComanda) {
              console.warn(`OFFLINE: Fechamento duplicado para comanda ${payload.idComanda} ignorado.`);
              return;
@@ -123,7 +121,6 @@ export const localDatabaseService = {
  async criarComanda(numero: number, idCliente?: string): Promise<ComandaLocal> {
     const idLocal = createLocalId();
     
-    // 1. Busca os dados do cliente para exibir o nome na tela IMEDIATAMENTE
     let clienteDados = undefined;
     if (idCliente) {
         clienteDados = await db.clientes.get(idCliente);
@@ -137,11 +134,9 @@ export const localDatabaseService = {
       criado_em: new Date().toISOString(),
       itens: [],
       pagamentos: [],
-      // 2. Anexa o objeto cliente completo aqui
       cliente: clienteDados 
     };
     
-    // Salva no banco (o Dexie salva o objeto 'cliente' junto se ele estiver na estrutura)
     await db.comandas.add(novaComanda); 
 
     await this.addPendingAction('CRIAR_COMANDA', { 
@@ -173,7 +168,6 @@ export const localDatabaseService = {
   },
 
   async fecharComanda(idComanda: string, pagamentosInput: PagamentoInput[]): Promise<void> {
-    // Verifica se JÁ está fechada localmente para nem iniciar o processo
     const comanda = await db.comandas.get(idComanda);
     if (comanda && comanda.status === 'fechada') {
         console.warn("OFFLINE: Comanda já fechada localmente.");
@@ -232,7 +226,15 @@ export const localDatabaseService = {
     });
   },
 
-  // --- PRODUTOS, CLIENTES (Sem Alterações) ---
+  // --- MÉTODOS SIMPLES (Produtos, Clientes, Deletar Comanda) ---
+  
+  async deletarComanda(id: string): Promise<void> {
+    await db.transaction('rw', db.comandas, db.itensComanda, async () => {
+        await db.itensComanda.where('id_comanda').equals(id).delete();
+        await db.comandas.delete(id);
+    });
+  },
+
   async listarProdutos(): Promise<Produto[]> { return db.produtos.toArray(); },
   async listarProdutosAtivos(): Promise<Produto[]> { return db.produtos.filter(p => p.ativo === true).toArray(); },
   async criarProduto(produto: Omit<Produto, 'id' | 'criado_em'>): Promise<Produto> {

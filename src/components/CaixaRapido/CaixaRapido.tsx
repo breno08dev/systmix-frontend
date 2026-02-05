@@ -1,6 +1,6 @@
 // src/components/CaixaRapido/CaixaRapido.tsx
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ShoppingCart, Search, Trash2, CreditCard, Banknote, QrCode, CheckCircle, Package, Lock, Unlock, Loader2 } from 'lucide-react';
+import { ShoppingCart, Search, Trash2, CreditCard, Banknote, QrCode, CheckCircle, Package, Lock, Unlock, Loader2, Plus, Minus } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
 import { comandasService } from '../../services/comandas'; 
 import { useCaixa } from '../../contexts/CaixaContext';
@@ -36,6 +36,7 @@ export const CaixaRapido: React.FC = () => {
   }, [isOnline]);
 
   useEffect(() => {
+    // Foca na busca sempre que houver interação, mantendo o fluxo ágil
     if (caixaAberto) {
         inputBuscaRef.current?.focus();
     }
@@ -61,9 +62,18 @@ export const CaixaRapido: React.FC = () => {
     );
   }, [produtos, termoBusca]);
 
+  // Calcula estoque restante considerando o carrinho
+  const getEstoqueAtual = (produto: Produto) => {
+    const itemNoCarrinho = carrinho.find(item => item.id === produto.id);
+    const qtdNoCarrinho = itemNoCarrinho ? itemNoCarrinho.quantidadeCarrinho : 0;
+    return produto.estoque - qtdNoCarrinho;
+  };
+
   const adicionarAoCarrinho = (produto: Produto) => {
-    if (produto.estoque <= 0) {
-        addToast('Produto esgotado!', 'error');
+    const estoqueAtual = getEstoqueAtual(produto);
+
+    if (estoqueAtual <= 0) {
+        addToast('Estoque insuficiente!', 'error');
         return;
     }
 
@@ -71,11 +81,6 @@ export const CaixaRapido: React.FC = () => {
         const itemExistente = prev.find(item => item.id === produto.id);
         
         if (itemExistente) {
-            // Verifica se a quantidade futura excede o estoque atual
-            if (itemExistente.quantidadeCarrinho + 1 > produto.estoque) {
-                addToast(`Estoque insuficiente! Só restam ${produto.estoque} unidades.`, 'error');
-                return prev;
-            }
             return prev.map(item => item.id === produto.id 
                 ? { ...item, quantidadeCarrinho: item.quantidadeCarrinho + 1 } 
                 : item
@@ -84,12 +89,31 @@ export const CaixaRapido: React.FC = () => {
         
         return [...prev, { ...produto, quantidadeCarrinho: 1 }];
     });
-    setTermoBusca('');
+    
+    // NÃO limpa a busca para manter a pesquisa aberta
     inputBuscaRef.current?.focus();
   };
 
-  const removerDoCarrinho = (idProduto: string) => {
+  const removerUmDoCarrinho = (produto: Produto) => {
+    setCarrinho(prev => {
+        const itemExistente = prev.find(item => item.id === produto.id);
+        if (!itemExistente) return prev;
+
+        if (itemExistente.quantidadeCarrinho > 1) {
+            return prev.map(item => item.id === produto.id 
+                ? { ...item, quantidadeCarrinho: item.quantidadeCarrinho - 1 }
+                : item
+            );
+        } else {
+            return prev.filter(item => item.id !== produto.id);
+        }
+    });
+    inputBuscaRef.current?.focus();
+  };
+
+  const removerDoCarrinhoTotal = (idProduto: string) => {
     setCarrinho(prev => prev.filter(item => item.id !== idProduto));
+    inputBuscaRef.current?.focus();
   };
 
   const totalVenda = useMemo(() => {
@@ -133,11 +157,12 @@ export const CaixaRapido: React.FC = () => {
 
         addToast(`Venda finalizada! Troco: R$ ${troco.toFixed(2)}`, 'success');
         
-        await carregarProdutos(); // Recarrega estoque após venda
+        await carregarProdutos(); 
         
         setCarrinho([]);
         setValorRecebido('');
         setMetodoPagamento('DINHEIRO');
+        setTermoBusca(''); // Limpa a busca só no final da venda
 
     } catch (error: any) {
         console.error(error);
@@ -182,7 +207,7 @@ export const CaixaRapido: React.FC = () => {
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-30px)] gap-4 p-4 max-w-[1920px] mx-auto overflow-hidden">
-      {/* ESQUERDA: PRODUTOS */}
+      {/* ESQUERDA: PRODUTOS (Catálogo volta a ser simples, mas com estoque inteligente) */}
       <div className="lg:w-2/3 flex flex-col gap-4 h-full">
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 shrink-0">
             <div className="flex justify-between items-center mb-4">
@@ -230,42 +255,57 @@ export const CaixaRapido: React.FC = () => {
             
             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                 <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 content-start pb-4">
-                    {(termoBusca ? produtosFiltrados : produtos).map(produto => (
-                        <button
-                            key={produto.id}
-                            onClick={() => adicionarAoCarrinho(produto)}
-                            disabled={produto.estoque <= 0}
-                            className={`
-                                relative p-4 rounded-xl border text-left transition-all group overflow-hidden flex flex-col h-[140px] justify-between
-                                ${produto.estoque <= 0 
-                                ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed' 
-                                : 'bg-white border-slate-200 hover:border-indigo-500 hover:shadow-md hover:shadow-indigo-500/10 hover:-translate-y-0.5'
-                                }
-                            `}
-                        >
-                            <div className="w-full">
-                                <span className="font-bold text-slate-800 text-sm line-clamp-2 leading-tight mb-1">
-                                    {produto.nome}
-                                </span>
-                                <span className="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wider">
-                                    {produto.categoria?.nome || 'Geral'}
-                                </span>
-                            </div>
+                    {(termoBusca ? produtosFiltrados : produtos).map(produto => {
+                        const estoqueAtual = getEstoqueAtual(produto);
+                        const itemNoCarrinho = carrinho.find(i => i.id === produto.id);
+                        const qtdNoCarrinho = itemNoCarrinho?.quantidadeCarrinho || 0;
+                        const esgotado = estoqueAtual <= 0;
 
-                            <div className="flex justify-between items-end w-full mt-auto pt-2 border-t border-slate-50">
-                                <span className="font-black text-emerald-600 text-lg">
-                                    R$ {produto.preco.toFixed(2)}
-                                </span>
-                                <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${
-                                    produto.estoque < 5 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
-                                }`}>
-                                    {produto.estoque} un
-                                </span>
-                            </div>
-                            
-                            <div className="absolute inset-0 bg-indigo-500/5 opacity-0 group-active:opacity-100 transition-opacity pointer-events-none" />
-                        </button>
-                    ))}
+                        return (
+                            <button
+                                key={produto.id}
+                                onClick={() => !esgotado && adicionarAoCarrinho(produto)}
+                                disabled={esgotado}
+                                className={`
+                                    relative p-4 rounded-xl border text-left transition-all group overflow-hidden flex flex-col h-[140px] justify-between
+                                    ${esgotado
+                                    ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed' 
+                                    : 'bg-white border-slate-200 hover:border-indigo-500 hover:shadow-md hover:shadow-indigo-500/10 hover:-translate-y-0.5'
+                                    }
+                                    ${qtdNoCarrinho > 0 ? 'ring-1 ring-indigo-500 border-indigo-500 bg-indigo-50/10' : ''}
+                                `}
+                            >
+                                <div className="w-full">
+                                    <span className="font-bold text-slate-800 text-sm line-clamp-2 leading-tight mb-1">
+                                        {produto.nome}
+                                    </span>
+                                    <span className="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wider">
+                                        {typeof produto.categoria === 'string' 
+                                            ? produto.categoria 
+                                            : (produto.categoria?.nome || 'Geral')}
+                                    </span>
+                                </div>
+
+                                <div className="flex justify-between items-end w-full mt-auto pt-2 border-t border-slate-50">
+                                    <span className="font-black text-emerald-600 text-lg">
+                                        R$ {produto.preco.toFixed(2)}
+                                    </span>
+                                    {/* Exibe o estoque real (descontando o carrinho) */}
+                                    <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${
+                                        estoqueAtual < 5 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
+                                    }`}>
+                                        {estoqueAtual} un
+                                    </span>
+                                </div>
+                                
+                                {qtdNoCarrinho > 0 && (
+                                    <div className="absolute top-2 right-2 bg-indigo-600 text-white text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full shadow-md">
+                                        {qtdNoCarrinho}
+                                    </div>
+                                )}
+                            </button>
+                        );
+                    })}
                     
                     {produtos.length === 0 && !loading && (
                         <div className="col-span-full h-40 flex flex-col items-center justify-center text-slate-400">
@@ -278,7 +318,7 @@ export const CaixaRapido: React.FC = () => {
         </div>
       </div>
 
-      {/* DIREITA: CUPOM / PAGAMENTO */}
+      {/* DIREITA: CUPOM / PAGAMENTO (Botões + e - adicionados aqui) */}
       <div className="lg:w-1/3 flex flex-col bg-slate-900 rounded-2xl shadow-2xl overflow-hidden text-white h-full border border-slate-800">
         <div className="p-5 bg-slate-800/50 border-b border-slate-700 flex justify-between items-center shrink-0">
             <span className="font-bold text-slate-300 text-sm uppercase tracking-wider">Cupom de Venda</span>
@@ -294,30 +334,52 @@ export const CaixaRapido: React.FC = () => {
                     <p className="text-sm font-medium">Caixa Livre</p>
                 </div>
             ) : (
-                carrinho.map((item, index) => (
-                    <div key={`${item.id}-${index}`} className="group flex items-center justify-between p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 hover:bg-slate-800 hover:border-slate-600 transition-all">
-                        <div className="flex-1 min-w-0 pr-3">
-                            <p className="font-medium truncate text-slate-200 text-sm mb-0.5">{item.nome}</p>
-                            <div className="flex items-center gap-2 text-xs text-slate-400">
-                                <span className="bg-slate-700 px-1.5 rounded text-white font-bold">{item.quantidadeCarrinho}x</span>
-                                <span>R$ {item.preco.toFixed(2)}</span>
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="text-right">
-                                <p className="font-bold text-emerald-400 text-sm">
+                carrinho.map((item, index) => {
+                    const estoqueAtual = getEstoqueAtual(item); // Para saber se pode adicionar mais
+                    return (
+                        <div key={`${item.id}-${index}`} className="group flex flex-col p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 hover:bg-slate-800 hover:border-slate-600 transition-all gap-2">
+                            {/* Linha de cima: Nome e Preço Total */}
+                            <div className="flex justify-between items-start">
+                                <p className="font-medium truncate text-slate-200 text-sm flex-1 mr-2">{item.nome}</p>
+                                <p className="font-bold text-emerald-400 text-sm whitespace-nowrap">
                                     R$ {(item.quantidadeCarrinho * item.preco).toFixed(2)}
                                 </p>
                             </div>
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); removerDoCarrinho(item.id); }}
-                                className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-400/10 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                            >
-                                <Trash2 size={16} />
-                            </button>
+                            
+                            {/* Linha de baixo: Controles e Preço Unitário */}
+                            <div className="flex items-center justify-between">
+                                <div className="text-xs text-slate-400">
+                                    Unit: R$ {item.preco.toFixed(2)}
+                                </div>
+
+                                <div className="flex items-center bg-slate-900 rounded-lg p-1 border border-slate-700">
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); removerUmDoCarrinho(item); }}
+                                        className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-400/10 rounded transition-colors"
+                                    >
+                                        <Minus size={14} />
+                                    </button>
+                                    
+                                    <span className="mx-3 font-bold text-sm min-w-[20px] text-center text-white">
+                                        {item.quantidadeCarrinho}
+                                    </span>
+                                    
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); adicionarAoCarrinho(item); }}
+                                        disabled={estoqueAtual <= 0}
+                                        className={`p-1 rounded transition-colors ${
+                                            estoqueAtual <= 0 
+                                            ? 'text-slate-600 cursor-not-allowed' 
+                                            : 'text-slate-400 hover:text-emerald-400 hover:bg-emerald-400/10'
+                                        }`}
+                                    >
+                                        <Plus size={14} />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                ))
+                    );
+                })
             )}
         </div>
 

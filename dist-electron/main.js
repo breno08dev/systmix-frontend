@@ -1,33 +1,25 @@
-import { app, BrowserWindow } from "electron";
-import path from "path";
-import { fileURLToPath } from "url";
-const __filename$1 = fileURLToPath(import.meta.url);
-const __dirname$1 = path.dirname(__filename$1);
-const isDev = process.env.VITE_DEV_SERVER_URL;
-function createWindow() {
-  const iconPath = isDev ? path.join(__dirname$1, "../public/favicon.conect.png") : path.join(__dirname$1, "../dist/favicon.conect.png");
-  const mainWindow = new BrowserWindow({
+import { app as n, BrowserWindow as a } from "electron";
+import i from "path";
+import { fileURLToPath as l } from "url";
+const c = l(import.meta.url), o = i.dirname(c), t = process.env.VITE_DEV_SERVER_URL;
+function r() {
+  const s = t ? i.join(o, "../public/icon.png") : i.join(o, "../dist/icon.png"), e = new a({
     width: 1280,
     height: 720,
-    icon: iconPath,
+    icon: s,
+    // Define o ícone da janela e barra de tarefas
     webPreferences: {
-      // Atenção: Mantendo .cjs pois é o padrão do seu build
-      preload: path.join(__dirname$1, "preload.cjs"),
-      nodeIntegration: false,
-      contextIsolation: true
+      preload: i.join(o, "preload.cjs"),
+      nodeIntegration: !1,
+      contextIsolation: !0
     }
   });
-  mainWindow.setMenuBarVisibility(false);
-  if (isDev) {
-    mainWindow.loadURL(isDev);
-  } else {
-    mainWindow.loadFile(path.join(__dirname$1, "../dist/index.html"));
-  }
+  e.setMenuBarVisibility(!1), t ? e.loadURL(t) : e.loadFile(i.join(o, "../dist/index.html"));
 }
-app.whenReady().then(createWindow);
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+n.whenReady().then(r);
+n.on("window-all-closed", () => {
+  process.platform !== "darwin" && n.quit();
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+n.on("activate", () => {
+  a.getAllWindows().length === 0 && r();
 });

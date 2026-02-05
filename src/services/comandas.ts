@@ -4,18 +4,14 @@ import { Comanda, ItemComanda, PagamentoInput } from '../types';
 import { db, localDatabaseService } from '../lib/localDatabase';
 
 // --- FUNÇÃO AUXILIAR PARA NORMALIZAR DADOS ---
-// Resolve o erro de Tipagem (null vs number) e Categoria (string vs object)
 const normalizarItem = (item: any): ItemComanda => {
     if (!item) return item;
-    
     return {
         ...item,
         produto: item.produto ? {
             ...item.produto,
-            // Garante que não seja null
             estoque: Number(item.produto.estoque ?? 0), 
             preco: Number(item.produto.preco ?? 0),
-            // Garante fallback para categoria string
             categoria: item.produto.categoria || 'Geral' 
         } : undefined
     } as ItemComanda;
@@ -28,40 +24,30 @@ export const comandasService = {
       try {
         const { data, error } = await supabase
           .from('comandas')
-          .select(`
-            *, 
-            cliente:clientes(*), 
-            itens:itens_comanda(*, produto:produtos(*))
-          `)
+          .select(`*, cliente:clientes(*), itens:itens_comanda(*, produto:produtos(*))`)
           .eq('status', 'aberta')
           .order('numero', { ascending: true });
         
         if (error) throw error;
         
-        // Mapeamento usando a normalização
         const comandas = (data || []).map((c: any) => ({
             ...c,
             status: (c.status === 'aberta' || c.status === 'fechada') ? c.status : 'aberta',
             itens: c.itens ? c.itens.map((i: any) => normalizarItem(i)) : []
         })) as Comanda[];
 
-        // CACHE: Salva dados para offline
+        // CACHE
         if (comandas.length > 0) {
             const comandasParaCache = comandas.map(({ itens: _itens, cliente: _cliente, ...resto }) => ({
                 ...resto,
                 pagamentos: [] 
             }));
             await db.comandas.bulkPut(comandasParaCache as any);
-
             const todosItens = comandas.flatMap(c => c.itens || []);
             await db.itensComanda.bulkPut(todosItens as any);
-            
             const clientesEncontrados = comandas.map(c => c.cliente).filter((c): c is any => !!c);
-            if (clientesEncontrados.length > 0) {
-                 await db.clientes.bulkPut(clientesEncontrados);
-            }
+            if (clientesEncontrados.length > 0) await db.clientes.bulkPut(clientesEncontrados);
         }
-        
         return comandas;
       } catch (err) {
         console.error("Erro online, fallback offline:", err);
@@ -75,27 +61,21 @@ export const comandasService = {
  async buscarPorId(isOnline: boolean, id: string): Promise<Comanda | null> {
     if (!isOnline) {
        const comanda = await db.comandas.get(id);
-       
        if (comanda) {
-          // Busca itens
           const itens = await db.itensComanda.where('id_comanda').equals(id).toArray();
           for (const item of itens) {
              const prod = await db.produtos.get(item.id_produto);
              if (prod) item.produto = prod;
           }
-
-          // CORREÇÃO: Se tiver ID do cliente mas não tiver o objeto cliente, busca agora!
           if (comanda.id_cliente && !comanda.cliente) {
               const cli = await db.clientes.get(comanda.id_cliente);
               if (cli) comanda.cliente = cli;
           }
-
           return { ...comanda, itens } as Comanda;
        }
        return null;
     }
 
-    // Modo Online (mantém como estava)
     const { data, error } = await supabase
       .from('comandas')
       .select(`*, cliente:clientes(*), itens:itens_comanda(*, produto:produtos(*))`)
@@ -105,80 +85,75 @@ export const comandasService = {
     if (error) throw error;
     if (!data) return null;
 
-    return {
-        ...data,
-        itens: data.itens?.map((i: any) => normalizarItem(i))
-    } as Comanda;
+    return { ...data, itens: data.itens?.map((i: any) => normalizarItem(i)) } as Comanda;
   },
 
  async criarComanda(isOnline: boolean, numero: number, idCliente?: string): Promise<Comanda> {
   if (isOnline) {
-    // Tenta buscar primeiro
-    const { data: existente, error: erroBusca } = await supabase
+    const { data: existente } = await supabase
         .from('comandas')
         .select(`*, cliente:clientes(*)`)
         .eq('numero', numero)
         .eq('status', 'aberta')
         .maybeSingle();
     
-    // Se achou, retorna ela mesma (evita o erro 409)
-    if (existente) {
-        // Opcional: Atualizar o cliente se foi passado um novo
-        return existente as Comanda;
-    }
+    if (existente) return existente as Comanda;
 
-    // Se não achou, cria
     const { data, error } = await supabase
       .from('comandas')
       .insert([{ numero, id_cliente: idCliente, status: 'aberta' }])
       .select(`*, cliente:clientes(*)`)
       .single();
-      if (error) throw error;
       
+      if (error) throw error;
       const novaComanda = data as Comanda;
       await db.comandas.put({ ...novaComanda, itens: [], pagamentos: [] });
       return novaComanda;
     } else {
-      const novaComanda = await localDatabaseService.criarComanda(numero, idCliente);
-      await localDatabaseService.addPendingAction('CRIAR_COMANDA', { 
-        numero, 
-        idCliente,
-        idTemp: novaComanda.id 
-      });
-      return novaComanda;
+      return await localDatabaseService.criarComanda(numero, idCliente);
+    }
+  },
+
+  // --- NOVA FUNÇÃO ADICIONADA: EXCLUIR ---
+  async excluir(isOnline: boolean, id: string): Promise<void> {
+    if (isOnline) {
+        // Deleta do Supabase
+        const { error } = await supabase.from('comandas').delete().eq('id', id);
+        if (error) throw error;
+
+        // Limpa do local também para não ficar "fantasma"
+        await db.comandas.delete(id);
+        await db.itensComanda.where('id_comanda').equals(id).delete();
+    } else {
+        // Deleta apenas local
+        await db.comandas.delete(id);
+        await db.itensComanda.where('id_comanda').equals(id).delete();
+        // Nota: Se precisar que essa exclusão suba pro servidor depois, 
+        // precisaria adicionar um 'addPendingAction' aqui e tratar no SyncContext.
     }
   },
 
   async adicionarItem(isOnline: boolean, idComanda: string, item: any): Promise<ItemComanda> {
     if (isOnline) {
-        const { data: produto } = await supabase.from('produtos').select('estoque').eq('id', item.id_produto).single();
+        const { data: produto } = await supabase.from('produtos').select('estoque').eq('id', item.id_produto).maybeSingle();
         const estoqueAtual = produto?.estoque ?? 0;
-        
         if (estoqueAtual < item.quantidade) throw new Error("Estoque insuficiente (Online).");
 
         const { data: itemExistente } = await supabase.from('itens_comanda').select('*').eq('id_comanda', idComanda).eq('id_produto', item.id_produto).maybeSingle();
-
         let itemFinal;
 
         if (itemExistente) {
             const novaQtd = itemExistente.quantidade + item.quantidade;
             const { data, error } = await supabase.from('itens_comanda').update({ quantidade: novaQtd }).eq('id', itemExistente.id).select(`*, produto:produtos(*)`).single();
             if (error) throw error;
-            
-            // CORREÇÃO: Normaliza antes de usar
             itemFinal = normalizarItem(data);
-            
             await db.itensComanda.update(itemExistente.id, { quantidade: novaQtd });
         } else {
             const { data, error } = await supabase.from('itens_comanda').insert([{ ...item, id_comanda: idComanda }]).select(`*, produto:produtos(*)`).single();
             if (error) throw error;
-            
-            // CORREÇÃO: Normaliza antes de usar
             itemFinal = normalizarItem(data);
-            
             await db.itensComanda.put(itemFinal); 
         }
-
         await supabase.from('produtos').update({ estoque: estoqueAtual - item.quantidade }).eq('id', item.id_produto);
         return itemFinal;
     } else {
@@ -204,17 +179,13 @@ export const comandasService = {
 
  async removerItem(isOnline: boolean, _idComanda: string, idItem: string): Promise<void> {
     if (isOnline) {
-        const { data: item } = await supabase.from('itens_comanda').select('*').eq('id', idItem).single();
-        await supabase.from('itens_comanda').delete().eq('id', idItem);
-        
+        const { data: item } = await supabase.from('itens_comanda').select('*').eq('id', idItem).maybeSingle();
         if (item) {
-            const { data: prod } = await supabase.from('produtos').select('estoque').eq('id', item.id_produto).single();
-            // CORREÇÃO: (prod.estoque ?? 0) garante que virou número antes de somar
+            await supabase.from('itens_comanda').delete().eq('id', idItem);
+            const { data: prod } = await supabase.from('produtos').select('estoque').eq('id', item.id_produto).maybeSingle();
             if (prod) {
                 const estoqueAtual = Number(prod.estoque ?? 0); 
-                await supabase.from('produtos')
-                    .update({ estoque: estoqueAtual + item.quantidade })
-                    .eq('id', item.id_produto);
+                await supabase.from('produtos').update({ estoque: estoqueAtual + item.quantidade }).eq('id', item.id_produto);
             }
         }
         await db.itensComanda.delete(idItem);
@@ -223,38 +194,31 @@ export const comandasService = {
         await localDatabaseService.removerItem(idItem);
         if (item) {
              const prod = await db.produtos.get(item.id_produto);
-             // Correção Local também, por garantia
              if (prod) {
                  const estoqueAtual = Number(prod.estoque ?? 0);
                  await db.produtos.update(item.id_produto, { estoque: estoqueAtual + item.quantidade });
              }
         }
-        await localDatabaseService.addPendingAction('REMOVER_ITEM', { idItem, idComanda: _idComanda });
     }
   },
 
   async atualizarQuantidadeItem(isOnline: boolean, _idComanda: string, idItem: string, novaQuantidade: number): Promise<void> {
      if (isOnline) {
-       const { data: itemAtual } = await supabase.from('itens_comanda').select('quantidade, id_produto').eq('id', idItem).single();
+       const { data: itemAtual } = await supabase.from('itens_comanda').select('quantidade, id_produto').eq('id', idItem).maybeSingle();
        if (itemAtual) {
            const diferenca = novaQuantidade - itemAtual.quantidade;
            await supabase.from('itens_comanda').update({ quantidade: novaQuantidade }).eq('id', idItem);
-           
            if (diferenca !== 0) {
-              const { data: prod } = await supabase.from('produtos').select('estoque').eq('id', itemAtual.id_produto).single();
-              // CORREÇÃO: (prod.estoque ?? 0)
+              const { data: prod } = await supabase.from('produtos').select('estoque').eq('id', itemAtual.id_produto).maybeSingle();
               if (prod) {
                   const estoqueAtual = Number(prod.estoque ?? 0);
-                  await supabase.from('produtos')
-                    .update({ estoque: estoqueAtual - diferenca })
-                    .eq('id', itemAtual.id_produto);
+                  await supabase.from('produtos').update({ estoque: estoqueAtual - diferenca }).eq('id', itemAtual.id_produto);
               }
            }
            await db.itensComanda.update(idItem, { quantidade: novaQuantidade });
        }
      } else {
        await localDatabaseService.atualizarQuantidadeItem(idItem, novaQuantidade);
-       await localDatabaseService.addPendingAction('ATUALIZAR_QTD_ITEM', { id_item: idItem, id_comanda: _idComanda, novaQuantidade });
      }
   },
 
@@ -276,7 +240,6 @@ export const comandasService = {
         await db.comandas.update(idComanda, { status: 'fechada', fechado_em: dataFinal });
     } else {
         await localDatabaseService.fecharComanda(idComanda, pagamentos);
-        await localDatabaseService.addPendingAction('FECHAR_COMANDA', { idComanda, pagamentos, dataFechamento: dataFinal });
     }
   }
 };

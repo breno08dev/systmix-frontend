@@ -6,18 +6,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const isDev = process.env.VITE_DEV_SERVER_URL;
 
-
 function createWindow() {
+  // ATUALIZADO: Apontando para o icon.ico
+  // No build, o conteúdo da pasta 'public' vai para a raiz da 'dist'
   const iconPath = isDev
-    ? path.join(__dirname, '../public/favicon.conect.png')
-    : path.join(__dirname, '../dist/favicon.conect.png');
+    ? path.join(__dirname, '../public/icon.png') 
+    : path.join(__dirname, '../dist/icon.png');
 
   const mainWindow = new BrowserWindow({
     width: 1280, 
     height: 720, 
-    icon: iconPath,
+    icon: iconPath, // Define o ícone da janela e barra de tarefas
     webPreferences: {
-      // Atenção: Mantendo .cjs pois é o padrão do seu build
       preload: path.join(__dirname, 'preload.cjs'), 
       nodeIntegration: false, 
       contextIsolation: true,

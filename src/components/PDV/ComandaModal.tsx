@@ -11,6 +11,7 @@ import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
 import { X, Plus, Minus, Trash2, CreditCard, Banknote, QrCode, Printer, Search, ShoppingCart, User, Clock, Loader2, Receipt, Percent, Package } from 'lucide-react';
 
 
+
 const METODOS_PAGAMENTO_COMANDA = {
     DINHEIRO: 'Dinheiro - Comanda',
     CARTAO: 'Cartão - Comanda',

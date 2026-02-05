@@ -60,7 +60,8 @@ export const Clientes: React.FC = () => {
   const handleDeletarCliente = async () => {
     if (!clienteParaDeletar) return;
     try {
-      await clientesService.deletar(isOnline, clienteParaDeletar);
+      // CORREÇÃO AQUI: Mudado de .deletar para .excluir
+      await clientesService.excluir(isOnline, clienteParaDeletar);
       setClientes(prev => prev.filter(c => c.id !== clienteParaDeletar));
       addToast('Cliente removido com sucesso!', 'success');
     } catch (error) {

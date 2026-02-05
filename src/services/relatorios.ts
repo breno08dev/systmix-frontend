@@ -49,6 +49,8 @@ export const relatoriosService = {
     const totalCartao = pagamentos
         .filter(p => p.metodo === 'CARTAO')
         .reduce((acc, curr) => acc + Number(curr.valor), 0);
+
+        
     
     const totalGeral = totalDinheiro + totalPix + totalCartao;
     const qtdVendas = pagamentos.length;

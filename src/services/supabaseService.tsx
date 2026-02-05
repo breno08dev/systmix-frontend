@@ -26,17 +26,21 @@ function mapSupabaseClienteToCliente(data: any): Cliente {
   return { ...data, telefone: data.telefone || undefined, criado_em: data.criado_em || new Date().toISOString() };
 }
 
-// 🔥 CORREÇÃO DO CONFLITO DE TIPOS AQUI 🔥
+// 🔥 CORREÇÃO 1: Mapeamento correto para a Interface Caixa 🔥
 function mapSupabaseCaixaToCaixa(data: any): Caixa {
     return {
         id: data.id,
         aberto: data.aberto,
-        // Correção: Mapear para os nomes exatos da Interface Caixa
-        saldo_inicial: Number(data.saldo_inicial), 
-        saldo_atual: Number(data.saldo_atual),
-        aberto_em: data.aberto_em,
-        fechado_em: data.fechado_em || undefined,
-        operador: data.operador || undefined
+        // Banco (saldo_inicial) -> Interface (valor_inicial)
+        valor_inicial: Number(data.saldo_inicial), 
+        // Banco (saldo_atual) -> Interface (saldo_atual_local) e valor_final se fechado
+        valor_final: !data.aberto ? Number(data.saldo_atual) : null,
+        saldo_atual_local: Number(data.saldo_atual),
+        // Banco (aberto_em) -> Interface (data_abertura)
+        data_abertura: data.aberto_em,
+        // Banco (fechado_em) -> Interface (data_fechamento)
+        data_fechamento: data.fechado_em || null,
+        operador: data.operador || null
     };
 }
 
@@ -59,20 +63,23 @@ export const supabaseComandasService = {
     return mapSupabaseComandaToComanda(data);
   },
   async adicionarItem(idComanda: string, item: Omit<ItemComanda, 'id' | 'id_comanda' | 'criado_em'>): Promise<ItemComanda> {
+    // 🔥 CORREÇÃO 2: Tipagem do retorno da RPC para acessar .id sem erro 🔥
     const { data: rpcData, error: rpcError } = await supabase.rpc('adicionar_item_comanda', { 
       p_id_comanda: idComanda, 
       p_id_produto: item.id_produto, 
       p_valor_unit: item.valor_unit 
     });
     
-    // Fallback se RPC falhar ou não retornar dados, tenta insert direto se possível, ou lança erro
     if (rpcError) lancarErroSupabase(rpcError);
     if (!rpcData) lancarErroSupabase({ message: 'A função RPC não retornou dados.' });
+
+    // Cast seguro para acessar o ID
+    const rpcResult = rpcData as any;
 
     const { data: itemCompleto, error: itemError } = await supabase
       .from('itens_comanda')
       .select('*, produto:produtos(*)')
-      .eq('id', rpcData.id) 
+      .eq('id', rpcResult.id) 
       .single();
     
     if (itemError || !itemCompleto) lancarErroSupabase(itemError || 'Erro ao buscar item pós-RPC');
@@ -99,32 +106,71 @@ export const supabaseProdutosService = {
     if (error) lancarErroSupabase(error);
     return data?.map(mapSupabaseProdutoToProduto) || [];
   },
+
   async listarAtivos(): Promise<Produto[]> {
     const { data, error } = await supabase.from('produtos').select('*').eq('ativo', true).order('nome', { ascending: true });
     if (error) lancarErroSupabase(error);
     return data?.map(mapSupabaseProdutoToProduto) || [];
   },
+
   async criar(produto: Omit<Produto, 'id' | 'criado_em'>): Promise<Produto> {
-    const { data, error } = await supabase.from('produtos').insert(produto).select().single();
+    // CORREÇÃO: Prepara o objeto para o formato estrito do banco
+    const payloadBanco = {
+        ...produto,
+        // Se categoria for objeto (Categoria), pega o nome. Se for string, usa ela mesma.
+        categoria: typeof produto.categoria === 'object' ? produto.categoria?.nome || 'Geral' : produto.categoria,
+        // Garante que o id_categoria seja string ou null (não undefined)
+        id_categoria: produto.id_categoria || null
+    };
+
+    const { data, error } = await supabase.from('produtos').insert(payloadBanco).select().single();
     if (error || !data) lancarErroSupabase(error || 'Erro ao criar produto');
     return mapSupabaseProdutoToProduto(data);
   },
+
+  async obterTotalVendasCaixaAtual(dataAbertura: string): Promise<number> {
+    // Busca todos os pagamentos feitos DEPOIS que o caixa abriu
+    const { data, error } = await supabase
+      .from('pagamentos')
+      .select('valor')
+      .gte('data', dataAbertura); // gte = greater than or equal (maior ou igual)
+
+    if (error) {
+      console.error("Erro ao calcular vendas do caixa:", error);
+      return 0;
+    }
+
+    // Soma os valores
+    const total = data.reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0);
+    return total;
+  },
+
   async atualizar(id: string, produto: Partial<Produto>): Promise<Produto> {
-    const { data, error } = await supabase.from('produtos').update(produto).eq('id', id).select().single();
+    // CORREÇÃO: Mesma lógica de limpeza para atualização
+    const payloadBanco: any = { ...produto };
+    
+    if (produto.categoria !== undefined) {
+        payloadBanco.categoria = typeof produto.categoria === 'object' 
+            ? produto.categoria?.nome || 'Geral' 
+            : produto.categoria;
+    }
+
+    const { data, error } = await supabase.from('produtos').update(payloadBanco).eq('id', id).select().single();
     if (error || !data) lancarErroSupabase(error || 'Erro ao atualizar produto');
     return mapSupabaseProdutoToProduto(data);
   },
+
   async deletar(id: string): Promise<void> {
     const { error } = await supabase.from('produtos').delete().eq('id', id);
     if (error) lancarErroSupabase(error);
   },
+
   async verificarUsoProduto(id: string): Promise<boolean> {
     const { error, count } = await supabase.from('itens_comanda').select('id', { count: 'exact', head: true }).eq('id_produto', id);
     if (error) lancarErroSupabase(error);
     return (count || 0) > 0;
   },
 };
-
 // --- Serviço de Clientes ---
 export const supabaseClientesService = {
   async listar(): Promise<Cliente[]> {
@@ -148,8 +194,8 @@ export const supabaseClientesService = {
   },
 };
 
-// --- Serviço de Caixa ---
 export const supabaseCaixaService = {
+  
   async obterCaixaAberto(): Promise<Caixa | null> {
     const { data, error } = await supabase
       .from('caixas')
@@ -160,7 +206,6 @@ export const supabaseCaixaService = {
       .single();
 
     if (error) {
-       // Código PGRST116 significa "Nenhum resultado encontrado", o que é normal se não tiver caixa aberto
        if (error.code !== 'PGRST116') {
           console.error("Erro ao buscar caixa aberto:", error);
        }
@@ -169,6 +214,23 @@ export const supabaseCaixaService = {
 
     if (!data) return null;
     return mapSupabaseCaixaToCaixa(data);
+  },
+
+  // 🔥 ESTA É A FUNÇÃO QUE FALTAVA 🔥
+  async obterTotalVendasCaixaAtual(dataAbertura: string): Promise<number> {
+    const { data, error } = await supabase
+      .from('pagamentos')
+      .select('valor')
+      .gte('data', dataAbertura); // Pega tudo DEPOIS da abertura
+
+    if (error) {
+      console.error("Erro ao calcular vendas do caixa:", error);
+      return 0;
+    }
+
+    // Soma os valores
+    const total = data?.reduce((acc, curr) => acc + (Number(curr.valor) || 0), 0) || 0;
+    return total;
   },
 
   async abrirCaixa(valorInicial: number, operador: string): Promise<Caixa> {
@@ -189,7 +251,6 @@ export const supabaseCaixaService = {
         throw new Error(error.message);
     }
 
-    // Registra a movimentação inicial
     await supabase.from('movimentacoes_caixa').insert([{
         id_caixa: data.id,
         tipo: 'abertura',
@@ -215,7 +276,6 @@ export const supabaseCaixaService = {
         throw new Error(error.message);
     }
     
-    // Registra movimentação de fechamento
     await supabase.from('movimentacoes_caixa').insert([{
         id_caixa: idCaixa,
         tipo: 'fechamento',
@@ -224,7 +284,6 @@ export const supabaseCaixaService = {
     }]);
   },
   
-  // Atualiza saldo (usado em vendas)
   async atualizarSaldo(idCaixa: string, novoSaldo: number): Promise<void> {
       const { error } = await supabase
         .from('caixas')

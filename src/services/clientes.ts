@@ -51,8 +51,8 @@ export const clientesService = {
         await db.clientes.put(novoCliente);
         return novoCliente;
     } else {
+        // CORREÇÃO: O localDatabaseService já adiciona a pendência.
         const novo = await localDatabaseService.criarCliente(cliente);
-        await localDatabaseService.addPendingAction('CRIAR_CLIENTE', { cliente });
         return novo;
     }
   },

@@ -1,9 +1,15 @@
+// src/components/Dashboard/Dashboard.tsx
 import React, { useState, useEffect } from 'react';
 import { Receipt, Package, Users, TrendingUp, Eye, EyeOff, Clock } from 'lucide-react';
+
+// Serviços
 import { comandasService } from '../../services/comandas';
 import { produtosService } from '../../services/produtos';
 import { clientesService } from '../../services/clientes';
-import { relatoriosService } from '../../services/relatorios'; 
+import { supabaseCaixaService } from '../../services/supabaseService'; // 🔥 Importante para o cálculo correto
+import { db } from '../../lib/localDatabase'; // 🔥 Para cálculo offline
+
+// Tipos e Hooks
 import { Comanda } from '../../types';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useSync } from '../../contexts/SyncContext';
@@ -35,8 +41,6 @@ export const Dashboard: React.FC = () => {
   const { isOnline } = useOnlineStatus();
   const { isSyncing } = useSync();
   const { addToast } = useToast();
-  
-  // Usa apenas caixaAberto
   const { caixaAberto } = useCaixa(); 
 
   useEffect(() => {
@@ -44,35 +48,45 @@ export const Dashboard: React.FC = () => {
   }, [isOnline, isSyncing, caixaAberto]); 
 
   const carregarDados = async () => {
-    // 1. Verificação de segurança: Se não tem caixaAberto ou ele não tem data de abertura, zera e sai.
-    if (!caixaAberto || !caixaAberto.data_abertura) {
-      setStats({ comandasAbertas: 0, totalProdutos: 0, totalClientes: 0, faturamentoDia: 0 });
-      setComandasRecentes([]);
-      return; 
-    }
-
     try {
-      // 2. CORREÇÃO CRÍTICA DE DATA:
-      // O serviço espera 'YYYY-MM-DD'. O banco retorna ISO completo 'YYYY-MM-DDTHH:mm:ss...'
-      // Pegamos apenas os 10 primeiros caracteres para evitar "Invalid time value" no serviço.
-      const dataInicioStr = String(caixaAberto.data_abertura).substring(0, 10);
-      const dataFimStr = new Date().toISOString().substring(0, 10);
-
-      const [comandas, produtos, clientes, financeiro] = await Promise.all([
+      // 1. Carrega dados básicos (Comandas, Produtos, Clientes)
+      const [comandas, produtos, clientes] = await Promise.all([
         comandasService.listarAbertas(isOnline),
         produtosService.listarAtivos(isOnline),
-        clientesService.listar(isOnline),
-        // Passamos as strings limpas para o serviço
-        isOnline ? relatoriosService.buscarResumoFinanceiro(isOnline, dataInicioStr, dataFimStr) : Promise.resolve(null)
+        clientesService.listar(isOnline)
       ]);
+
+      // 2. LÓGICA DE FATURAMENTO POR TURNO (CORREÇÃO)
+      // O objetivo é somar tudo desde a hora que o caixa abriu, ignorando a meia-noite.
+      let totalVendasTurno = 0;
+
+      if (caixaAberto && caixaAberto.data_abertura) {
+          if (isOnline) {
+              // ONLINE: Usa a função nova que criamos no supabaseService
+              // Ela faz um "SELECT sum(valor) WHERE data >= data_abertura"
+              totalVendasTurno = await supabaseCaixaService.obterTotalVendasCaixaAtual(caixaAberto.data_abertura);
+          } else {
+              // OFFLINE: Filtra manualmente os pagamentos locais
+              const pagamentosLocais = await db.pagamentos.toArray();
+              const timestampAbertura = new Date(caixaAberto.data_abertura).getTime();
+              
+              totalVendasTurno = pagamentosLocais
+                  .filter(p => new Date(p.data).getTime() >= timestampAbertura)
+                  .reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
+          }
+      } else {
+          // Se não tem caixa aberto, o faturamento do turno é 0
+          totalVendasTurno = 0;
+      }
       
       setStats({
         comandasAbertas: comandas.length,
         totalProdutos: produtos.length,
         totalClientes: clientes.length,
-        faturamentoDia: financeiro?.totalGeral || 0
+        faturamentoDia: totalVendasTurno
       });
 
+      // Ordena comandas recentes
       const comandasOrdenadas = comandas.sort((a, b) => {
         const dateA = new Date(a.criado_em || 0).getTime();
         const dateB = new Date(b.criado_em || 0).getTime();
@@ -83,13 +97,13 @@ export const Dashboard: React.FC = () => {
 
     } catch (error: any) {
       console.error('Erro ao carregar dados do dashboard:', error);
-      // Evita spammar toast se for erro de conexão momentânea
       if (error.message !== 'Offline') {
-         addToast('Erro ao atualizar dashboard', 'error');
+         // Opcional: addToast('Erro ao atualizar dashboard', 'error');
       }
     }
   };
 
+  // Componente interno do Card
   const StatCard: React.FC<{
     title: string;
     value: string | number;
@@ -125,11 +139,16 @@ export const Dashboard: React.FC = () => {
           <p className="text-slate-500">Acompanhe o desempenho do seu estabelecimento em tempo real.</p>
         </div>
         
-        {caixaAberto && (
+        {caixaAberto ? (
           <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full text-sm font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            Caixa Aberto
+            Caixa Aberto desde {formatTimeSafe(caixaAberto.data_abertura)}
           </div>
+        ) : (
+            <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 border border-amber-100 rounded-full text-sm font-medium">
+                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                Caixa Fechado
+            </div>
         )}
       </div>
 
@@ -168,12 +187,12 @@ export const Dashboard: React.FC = () => {
             bg="bg-violet-50"
         />
         <StatCard 
-          title="Faturamento Hoje" 
+          title="Faturamento Turno" 
           value={faturamentoVisivel ? `R$ ${(stats.faturamentoDia || 0).toFixed(2).replace('.', ',')}` : 'R$ ••••'} 
           icon={TrendingUp} 
           color="text-indigo-600" 
           bg="bg-indigo-50" 
-          isVisibilityToggleable={isOnline && !!caixaAberto}
+          isVisibilityToggleable={!!caixaAberto}
           onToggleVisibility={() => setFaturamentoVisivel(!faturamentoVisivel)}
         />
       </div>

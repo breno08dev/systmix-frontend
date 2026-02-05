@@ -4,6 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 // Ponte do Banco de Dados (Mantendo seu código original)
 contextBridge.exposeInMainWorld('localApi', {
   getClientes: () => ipcRenderer.invoke('sqlite:get-clientes'),
+  imprimir: (content: string, styles: string) => ipcRenderer.invoke('imprimir-silencioso', { content, styles }),
   createCliente: (cliente: any) => ipcRenderer.invoke('sqlite:create-cliente', cliente),
   updateCliente: (id: string, cliente: any) => ipcRenderer.invoke('sqlite:update-cliente', id, cliente),
   deleteCliente: (id: string) => ipcRenderer.invoke('sqlite:delete-cliente', id),

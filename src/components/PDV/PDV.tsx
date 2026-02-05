@@ -41,7 +41,6 @@ export const PDV: React.FC = () => {
   }, [isOnline, isSyncing]); 
 
   const carregarDados = async () => {
-    // Não ativa loading total para não piscar a tela, apenas atualiza dados
     try {
       const [comandasData, produtosData, clientesData] = await Promise.all([
         comandasService.listarAbertas(isOnline),
@@ -79,26 +78,20 @@ export const PDV: React.FC = () => {
         cliente: clientObject || novaComanda.cliente 
       };
       
-      // Abre o modal diretamente
       setComandaSelecionada(comandaComCliente);
       
-      // Atualiza lista em background
       carregarDados(); 
     } catch (error: any) {
       addToast(error.message || 'Erro ao abrir comanda.', 'error');
     }
   };
 
-  const handleFecharModal = (idComandaFechada?: string) => {
+  const handleFecharModal = () => {
     setComandaSelecionada(null);
-    // ATENÇÃO: Recarrega sempre para garantir que os totais e status na lista estejam corretos
     carregarDados();
   };
   
   const handleItemAtualizado = () => {
-     // ATUALIZAÇÃO DE ESTOQUE:
-     // Quando um item é adicionado/alterado no modal, recarregamos os produtos no pai
-     // para que o estoque diminua na lista visualmente.
      carregarDados();
   };
   
@@ -111,7 +104,6 @@ export const PDV: React.FC = () => {
   return (
     <div className="p-8 max-w-[1600px] mx-auto min-h-screen flex flex-col gap-8">
       
-      {/* Cabeçalho */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight mb-2">Ponto de Venda</h1>
@@ -126,7 +118,6 @@ export const PDV: React.FC = () => {
         </div>
       </div>
 
-      {/* Seção de Comandas Abertas */}
       <section>
         <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -193,7 +184,6 @@ export const PDV: React.FC = () => {
         )}
       </section>
 
-      {/* Grade de Seleção Rápida */}
       <section className="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -243,7 +233,6 @@ export const PDV: React.FC = () => {
         </div>
       </section>
 
-      {/* Modais */}
       {numeroParaAbrir && (
         <AbrirComandaModal
           numeroComanda={numeroParaAbrir}

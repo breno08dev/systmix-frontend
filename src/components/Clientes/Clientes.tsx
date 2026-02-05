@@ -1,5 +1,5 @@
 // src/components/Clientes/Clientes.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Plus, Search, Edit, Trash2, Users, Phone, Mail, Loader2, User, Calendar } from 'lucide-react';
 import { clientesService } from '../../services/clientes';
 import { Cliente } from '../../types';
@@ -30,11 +30,8 @@ export const Clientes: React.FC = () => {
   const { addToast } = useToast();
   const { isOnline } = useOnlineStatus();
 
-  useEffect(() => {
-    carregarClientes();
-  }, [isOnline]);
-
-  const carregarClientes = async () => {
+  // useCallback para permitir o refresh seguro
+  const carregarClientes = useCallback(async () => {
     setLoading(true);
     try {
       const data = await clientesService.listar(isOnline);
@@ -45,7 +42,24 @@ export const Clientes: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isOnline, addToast]);
+
+  // EFEITO DE CARGA E SYNC AUTOMÁTICO
+  useEffect(() => {
+    carregarClientes();
+
+    // OUVE O EVENTO DE SYNC FINALIZADO PARA ATUALIZAR SOZINHO
+    const handleSyncComplete = () => {
+        console.log("♻️ Sync finalizado! Atualizando clientes...");
+        carregarClientes();
+    };
+
+    window.addEventListener('sync_completed', handleSyncComplete);
+
+    return () => {
+        window.removeEventListener('sync_completed', handleSyncComplete);
+    };
+  }, [carregarClientes]);
 
   const handleNovoCliente = () => {
     setClienteSelecionado(null);
@@ -60,7 +74,6 @@ export const Clientes: React.FC = () => {
   const handleDeletarCliente = async () => {
     if (!clienteParaDeletar) return;
     try {
-      // CORREÇÃO AQUI: Mudado de .deletar para .excluir
       await clientesService.excluir(isOnline, clienteParaDeletar);
       setClientes(prev => prev.filter(c => c.id !== clienteParaDeletar));
       addToast('Cliente removido com sucesso!', 'success');
@@ -141,7 +154,6 @@ export const Clientes: React.FC = () => {
                 >
                     {/* Topo: Ícone e Ações */}
                     <div className="flex items-start justify-between mb-4">
-                        {/* Ícone Padrão (Sem iniciais) */}
                         <div className="w-12 h-12 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
                             <User size={24} />
                         </div>

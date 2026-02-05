@@ -14,7 +14,7 @@ export {};
 declare global {
   interface Window {
     electron: {
-      imprimir: (html: string) => Promise<boolean>;
+      imprimir: (content: string, styles: string) => Promise<boolean>;
     };
   }
 }

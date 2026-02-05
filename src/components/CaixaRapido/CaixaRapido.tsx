@@ -1,6 +1,6 @@
 // src/components/CaixaRapido/CaixaRapido.tsx
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ShoppingCart, Search, Trash2, CreditCard, Banknote, QrCode, CheckCircle, Package, Lock, Unlock, Loader2, Plus, Minus } from 'lucide-react';
+import { ShoppingCart, Search, CreditCard, Banknote, QrCode, CheckCircle, Package, Lock, Unlock, Loader2, Plus, Minus } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
 import { comandasService } from '../../services/comandas'; 
 import { useCaixa } from '../../contexts/CaixaContext';
@@ -36,7 +36,6 @@ export const CaixaRapido: React.FC = () => {
   }, [isOnline]);
 
   useEffect(() => {
-    // Foca na busca sempre que houver interação, mantendo o fluxo ágil
     if (caixaAberto) {
         inputBuscaRef.current?.focus();
     }
@@ -62,7 +61,6 @@ export const CaixaRapido: React.FC = () => {
     );
   }, [produtos, termoBusca]);
 
-  // Calcula estoque restante considerando o carrinho
   const getEstoqueAtual = (produto: Produto) => {
     const itemNoCarrinho = carrinho.find(item => item.id === produto.id);
     const qtdNoCarrinho = itemNoCarrinho ? itemNoCarrinho.quantidadeCarrinho : 0;
@@ -90,7 +88,6 @@ export const CaixaRapido: React.FC = () => {
         return [...prev, { ...produto, quantidadeCarrinho: 1 }];
     });
     
-    // NÃO limpa a busca para manter a pesquisa aberta
     inputBuscaRef.current?.focus();
   };
 
@@ -108,11 +105,6 @@ export const CaixaRapido: React.FC = () => {
             return prev.filter(item => item.id !== produto.id);
         }
     });
-    inputBuscaRef.current?.focus();
-  };
-
-  const removerDoCarrinhoTotal = (idProduto: string) => {
-    setCarrinho(prev => prev.filter(item => item.id !== idProduto));
     inputBuscaRef.current?.focus();
   };
 
@@ -162,7 +154,7 @@ export const CaixaRapido: React.FC = () => {
         setCarrinho([]);
         setValorRecebido('');
         setMetodoPagamento('DINHEIRO');
-        setTermoBusca(''); // Limpa a busca só no final da venda
+        setTermoBusca('');
 
     } catch (error: any) {
         console.error(error);
@@ -207,7 +199,6 @@ export const CaixaRapido: React.FC = () => {
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-30px)] gap-4 p-4 max-w-[1920px] mx-auto overflow-hidden">
-      {/* ESQUERDA: PRODUTOS (Catálogo volta a ser simples, mas com estoque inteligente) */}
       <div className="lg:w-2/3 flex flex-col gap-4 h-full">
         <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 shrink-0">
             <div className="flex justify-between items-center mb-4">
@@ -290,7 +281,6 @@ export const CaixaRapido: React.FC = () => {
                                     <span className="font-black text-emerald-600 text-lg">
                                         R$ {produto.preco.toFixed(2)}
                                     </span>
-                                    {/* Exibe o estoque real (descontando o carrinho) */}
                                     <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${
                                         estoqueAtual < 5 ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
                                     }`}>
@@ -318,7 +308,6 @@ export const CaixaRapido: React.FC = () => {
         </div>
       </div>
 
-      {/* DIREITA: CUPOM / PAGAMENTO (Botões + e - adicionados aqui) */}
       <div className="lg:w-1/3 flex flex-col bg-slate-900 rounded-2xl shadow-2xl overflow-hidden text-white h-full border border-slate-800">
         <div className="p-5 bg-slate-800/50 border-b border-slate-700 flex justify-between items-center shrink-0">
             <span className="font-bold text-slate-300 text-sm uppercase tracking-wider">Cupom de Venda</span>
@@ -335,10 +324,9 @@ export const CaixaRapido: React.FC = () => {
                 </div>
             ) : (
                 carrinho.map((item, index) => {
-                    const estoqueAtual = getEstoqueAtual(item); // Para saber se pode adicionar mais
+                    const estoqueAtual = getEstoqueAtual(item); 
                     return (
                         <div key={`${item.id}-${index}`} className="group flex flex-col p-3 bg-slate-800/40 rounded-xl border border-slate-700/50 hover:bg-slate-800 hover:border-slate-600 transition-all gap-2">
-                            {/* Linha de cima: Nome e Preço Total */}
                             <div className="flex justify-between items-start">
                                 <p className="font-medium truncate text-slate-200 text-sm flex-1 mr-2">{item.nome}</p>
                                 <p className="font-bold text-emerald-400 text-sm whitespace-nowrap">
@@ -346,7 +334,6 @@ export const CaixaRapido: React.FC = () => {
                                 </p>
                             </div>
                             
-                            {/* Linha de baixo: Controles e Preço Unitário */}
                             <div className="flex items-center justify-between">
                                 <div className="text-xs text-slate-400">
                                     Unit: R$ {item.preco.toFixed(2)}

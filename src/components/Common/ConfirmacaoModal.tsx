@@ -1,7 +1,7 @@
 // src/components/Common/ConfirmacaoModal.tsx
 import React from 'react';
-import { AlertTriangle, CheckCircle, X, Info } from 'lucide-react';
-import Modal from '../Shared/Modal'; // Certifique-se de importar seu Modal base
+import { AlertTriangle, CheckCircle, Info } from 'lucide-react';
+import Modal from '../Shared/Modal';
 
 interface ConfirmacaoModalProps {
   isOpen: boolean;
@@ -26,7 +26,6 @@ export const ConfirmacaoModal: React.FC<ConfirmacaoModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  // Configuração visual baseada no tipo de alerta
   const estilos = {
     perigo: {
       bgIcon: 'bg-red-100',
@@ -79,7 +78,7 @@ export const ConfirmacaoModal: React.FC<ConfirmacaoModalProps> = ({
 
   return (
     <Modal
-      title="" // Título vazio no header padrão para focar no conteúdo central
+      title="" 
       onClose={onClose}
       footer={footer}
       maxWidth="max-w-sm"

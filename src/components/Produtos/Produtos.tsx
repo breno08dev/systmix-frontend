@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Search, Edit, Trash2, Tag, Lock, Unlock } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
 import { Produto } from '../../types';
 import ProdutoModal from './ProdutoModal';
-import { CategoriaModal } from './CategoriaModal'; 
+import {CategoriaModal} from './CategoriaModal'; 
 import { useToast } from '../../contexts/ToastContext';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
 
 // --- CONFIGURAÇÃO DA SENHA ---
-const SENHA_MESTRA = '1234'; 
+const SENHA_MESTRA = '123123'; 
 
 export const Produtos: React.FC = () => {
   // --- ESTADOS DE SEGURANÇA ---
@@ -30,13 +30,7 @@ export const Produtos: React.FC = () => {
   const { addToast } = useToast();
   const { isOnline } = useOnlineStatus();
 
-  // Carrega produtos apenas se o acesso estiver liberado
-  useEffect(() => {
-    if (acessoLiberado) {
-      carregarProdutos();
-    }
-  }, [isOnline, acessoLiberado]);
-
+  // --- FUNÇÕES AUXILIARES ---
   const handleVerificarSenha = (e: React.FormEvent) => {
     e.preventDefault();
     if (senhaInput === SENHA_MESTRA) {
@@ -50,7 +44,7 @@ export const Produtos: React.FC = () => {
     }
   };
 
-  const carregarProdutos = async () => {
+  const carregarProdutos = useCallback(async () => {
     setLoading(true);
     try {
       const data = await produtosService.listarAtivos(isOnline); 
@@ -60,7 +54,27 @@ export const Produtos: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isOnline, addToast]);
+
+  // --- EFEITO PRINCIPAL (CARGA + SYNC AUTOMÁTICO) ---
+  useEffect(() => {
+    if (acessoLiberado) {
+      // 1. Carrega inicialmente
+      carregarProdutos();
+
+      // 2. OUVINTE DE SINCRONIZAÇÃO (O segredo para atualizar sozinho)
+      const handleSyncComplete = () => {
+          console.log("♻️ Sync finalizado! Atualizando lista de produtos...");
+          carregarProdutos();
+      };
+
+      window.addEventListener('sync_completed', handleSyncComplete);
+
+      return () => {
+          window.removeEventListener('sync_completed', handleSyncComplete);
+      };
+    }
+  }, [isOnline, acessoLiberado, carregarProdutos]);
 
   const handleNovoProduto = () => {
     setProdutoSelecionado(null);
@@ -85,7 +99,7 @@ export const Produtos: React.FC = () => {
     }
   };
 
-  // --- CORREÇÃO DO FILTRO (Resolve o erro do TypeScript) ---
+  // --- FILTRO DE BUSCA ---
   const produtosFiltrados = produtos.filter(p => {
     const termo = termoBusca.toLowerCase();
     const nomeProduto = p.nome.toLowerCase();
@@ -210,7 +224,6 @@ export const Produtos: React.FC = () => {
                                     {produto.nome}
                                 </td>
                                 <td className="px-6 py-4">
-                                    {/* CORREÇÃO NA EXIBIÇÃO: Verifica se é string ou objeto */}
                                     {produto.categoria ? (
                                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
                                             {typeof produto.categoria === 'string' ? produto.categoria : produto.categoria.nome}
@@ -219,7 +232,9 @@ export const Produtos: React.FC = () => {
                                         <span className="text-slate-400 italic">Sem categoria</span>
                                     )}
                                 </td>
-                                <td className="px-6 py-4 font-semibold text-emerald-600">R$ {produto.preco.toFixed(2)}</td>
+                                <td className="px-6 py-4 font-semibold text-emerald-600">
+                                    {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(produto.preco)}
+                                </td>
                                 <td className="px-6 py-4">
                                     <div className={`inline-flex items-center gap-1.5 ${produto.estoque < 10 ? 'text-amber-600 font-bold' : ''}`}>
                                         {produto.estoque} un

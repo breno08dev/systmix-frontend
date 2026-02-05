@@ -2,21 +2,17 @@
 import React, { useState, useEffect } from 'react';
 import { Receipt, Package, Users, TrendingUp, Eye, EyeOff, Clock } from 'lucide-react';
 
-// Serviços
 import { comandasService } from '../../services/comandas';
 import { produtosService } from '../../services/produtos';
 import { clientesService } from '../../services/clientes';
-import { supabaseCaixaService } from '../../services/supabaseService'; // 🔥 Importante para o cálculo correto
-import { db } from '../../lib/localDatabase'; // 🔥 Para cálculo offline
+import { supabaseCaixaService } from '../../services/supabaseService'; 
+import { db } from '../../lib/localDatabase'; 
 
-// Tipos e Hooks
 import { Comanda } from '../../types';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useSync } from '../../contexts/SyncContext';
-import { useToast } from '../../contexts/ToastContext';
 import { useCaixa } from '../../contexts/CaixaContext';
 
-// Função segura para formatar horário
 const formatTimeSafe = (dateValue: any) => {
   if (!dateValue) return '--:--';
   try {
@@ -40,7 +36,6 @@ export const Dashboard: React.FC = () => {
   
   const { isOnline } = useOnlineStatus();
   const { isSyncing } = useSync();
-  const { addToast } = useToast();
   const { caixaAberto } = useCaixa(); 
 
   useEffect(() => {
@@ -49,24 +44,18 @@ export const Dashboard: React.FC = () => {
 
   const carregarDados = async () => {
     try {
-      // 1. Carrega dados básicos (Comandas, Produtos, Clientes)
       const [comandas, produtos, clientes] = await Promise.all([
         comandasService.listarAbertas(isOnline),
         produtosService.listarAtivos(isOnline),
         clientesService.listar(isOnline)
       ]);
 
-      // 2. LÓGICA DE FATURAMENTO POR TURNO (CORREÇÃO)
-      // O objetivo é somar tudo desde a hora que o caixa abriu, ignorando a meia-noite.
       let totalVendasTurno = 0;
 
       if (caixaAberto && caixaAberto.data_abertura) {
           if (isOnline) {
-              // ONLINE: Usa a função nova que criamos no supabaseService
-              // Ela faz um "SELECT sum(valor) WHERE data >= data_abertura"
               totalVendasTurno = await supabaseCaixaService.obterTotalVendasCaixaAtual(caixaAberto.data_abertura);
           } else {
-              // OFFLINE: Filtra manualmente os pagamentos locais
               const pagamentosLocais = await db.pagamentos.toArray();
               const timestampAbertura = new Date(caixaAberto.data_abertura).getTime();
               
@@ -75,7 +64,6 @@ export const Dashboard: React.FC = () => {
                   .reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
           }
       } else {
-          // Se não tem caixa aberto, o faturamento do turno é 0
           totalVendasTurno = 0;
       }
       
@@ -86,7 +74,6 @@ export const Dashboard: React.FC = () => {
         faturamentoDia: totalVendasTurno
       });
 
-      // Ordena comandas recentes
       const comandasOrdenadas = comandas.sort((a, b) => {
         const dateA = new Date(a.criado_em || 0).getTime();
         const dateB = new Date(b.criado_em || 0).getTime();
@@ -97,13 +84,9 @@ export const Dashboard: React.FC = () => {
 
     } catch (error: any) {
       console.error('Erro ao carregar dados do dashboard:', error);
-      if (error.message !== 'Offline') {
-         // Opcional: addToast('Erro ao atualizar dashboard', 'error');
-      }
     }
   };
 
-  // Componente interno do Card
   const StatCard: React.FC<{
     title: string;
     value: string | number;

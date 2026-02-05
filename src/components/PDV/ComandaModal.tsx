@@ -1,16 +1,12 @@
 // src/components/PDV/ComandaModal.tsx
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useReactToPrint } from 'react-to-print';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { comandasService } from '../../services/comandas';
-import { useCaixa } from '../../contexts/CaixaContext'; // <--- 1. IMPORTAR CONTEXTO
+import { useCaixa } from '../../contexts/CaixaContext';
 import { Comanda, Produto } from '../../types';
 import { Comprovante } from './Comprovante';
 import { useToast } from '../../contexts/ToastContext';
 import Modal from '../Shared/Modal';
-import { ConfirmacaoModal } from '../Common/ConfirmacaoModal'; 
-import { X, Plus, Minus, Trash2, CreditCard, Banknote, QrCode, Printer, Search, ShoppingCart, User, Clock, Loader2, Receipt, Percent, Package } from 'lucide-react';
-
-
+import { Plus, Minus, Trash2, CreditCard, Banknote, QrCode, Printer, Search, ShoppingCart, User, Clock, Loader2, Receipt, Percent, Package } from 'lucide-react';
 
 const METODOS_PAGAMENTO_COMANDA = {
     DINHEIRO: 'Dinheiro - Comanda',
@@ -53,18 +49,10 @@ export default function ComandaModal({
   const [carregando, setCarregando] = useState(false);
   const [loadingInicial, setLoadingInicial] = useState(true); 
   const [taxaServico, setTaxaServico] = useState(false);
-
-  const [confirmacao, setConfirmacao] = useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    tipo: 'aviso' as 'aviso' | 'perigo' | 'sucesso',
-    acao: () => {},
-  });
   
   const comprovanteRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
-  const { registrarVenda, caixaAberto } = useCaixa(); // <--- 2. USAR O HOOK
+  const { registrarVenda, caixaAberto } = useCaixa();
 
   useEffect(() => {
     if (comandaInicial.id) {
@@ -104,7 +92,41 @@ export default function ComandaModal({
     return produtos.filter(p => p.nome?.toLowerCase().includes(termo));
   }, [produtos, termoBusca]);
 
-  const handlePrint = useReactToPrint({ contentRef: comprovanteRef });
+  const handlePrint = async () => {
+      if (!comprovanteRef.current) return;
+      
+      setCarregando(true);
+      try {
+          // 1. Pega o HTML do comprovante
+          const content = comprovanteRef.current.outerHTML;
+          
+          // 2. Pega os estilos da página (Tailwind) para o comprovante não sair "pelado"
+          const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+              .map(node => node.outerHTML)
+              .join('');
+
+          // 3. Verifica se está no Electron
+          if (window.electron) {
+              await window.electron.imprimir(content, styles);
+              addToast('Enviado para impressão.', 'success');
+          } else {
+              // Fallback para Web (se abrir no navegador normal)
+              const printWindow = window.open('', '', 'width=600,height=600');
+              if (printWindow) {
+                  printWindow.document.write(`<html><head>${styles}</head><body>${content}</body></html>`);
+                  printWindow.document.close();
+                  printWindow.focus();
+                  printWindow.print();
+                  printWindow.close();
+              }
+          }
+      } catch (error) {
+          console.error("Erro ao imprimir:", error);
+          addToast('Erro ao imprimir.', 'error');
+      } finally {
+          setCarregando(false);
+      }
+  };
 
   const adicionarProduto = async (produto: Produto) => {
     if (carregando) return;
@@ -135,7 +157,7 @@ export default function ComandaModal({
   };
 
   const alterarQuantidade = async (itemId: string, novaQuantidade: number) => {
-    if (novaQuantidade < 1) return solicitarRemocaoItem(itemId);
+    if (novaQuantidade < 1) return removerItemConfirmado(itemId);
     
     const itemAtual = comandaAtual.itens?.find(i => i.id === itemId);
     
@@ -164,17 +186,8 @@ export default function ComandaModal({
     }
   };
 
-  const solicitarRemocaoItem = (itemId: string) => {
-    setConfirmacao({
-        isOpen: true,
-        title: 'Remover Item',
-        message: 'Tem certeza que deseja remover este item?',
-        tipo: 'perigo',
-        acao: () => removerItemConfirmado(itemId)
-    });
-  };
-
   const removerItemConfirmado = async (itemId: string) => {
+    if (!window.confirm("Remover este item?")) return;
     try {
       await comandasService.removerItem(isOnline, comandaAtual.id, itemId);
       setComandaAtual(prev => ({
@@ -188,7 +201,7 @@ export default function ComandaModal({
   };
   
   const solicitarFechamento = () => {
-    if (!caixaAberto) return addToast('O Caixa precisa estar aberto para receber valores!', 'error'); // <--- 3. VALIDAÇÃO
+    if (!caixaAberto) return addToast('O Caixa precisa estar aberto para receber valores!', 'error');
 
     if (totalFinal <= 0) return addToast('Comanda vazia.', 'error');
     
@@ -197,32 +210,25 @@ export default function ComandaModal({
       return addToast('Valor pago insuficiente.', 'error');
     }
 
-    setConfirmacao({
-        isOpen: true,
-        title: 'Fechar Comanda',
-        message: `Confirmar recebimento de R$ ${totalFinal.toFixed(2)} e fechar a mesa?`,
-        tipo: 'sucesso',
-        acao: () => fecharComandaConfirmado()
-    });
+    if(window.confirm(`Confirmar recebimento de R$ ${totalFinal.toFixed(2)} e fechar a mesa?`)){
+        fecharComandaConfirmado();
+    }
   };
 
   const fecharComandaConfirmado = async () => {
     setCarregando(true);
     try {
-      // 4. PRIMEIRO FECHA A COMANDA (BANCO)
       await comandasService.fecharComanda(isOnline, comandaAtual.id, [{
         metodo: metodoPagamento,
         valor: totalFinal,
       }]);
       
-      // 5. DEPOIS ATUALIZA O SALDO DA GAVETA (CONTEXTO)
-      // Mapeia o método de pagamento da comanda para o formato do caixa
       let metodoCaixa = 'OUTROS';
       if (metodoPagamento.includes('Dinheiro')) metodoCaixa = 'DINHEIRO';
       else if (metodoPagamento.includes('Cartão')) metodoCaixa = 'CARTAO';
       else if (metodoPagamento.includes('Pix')) metodoCaixa = 'PIX';
       
-      await registrarVenda(totalFinal, metodoCaixa); // <--- IMPORTANTE
+      await registrarVenda(totalFinal, metodoCaixa);
 
       addToast(`Comanda fechada com sucesso!`, 'success');
       onClose(comandaAtual.id); 
@@ -347,7 +353,7 @@ export default function ComandaModal({
                                                 <button onClick={() => alterarQuantidade(item.id, item.quantidade + 1)} className="w-6 h-6 flex items-center justify-center bg-slate-100 rounded hover:bg-slate-200"><Plus size={14} /></button>
                                             </div>
                                             <div className="text-right ml-3 min-w-[60px]"><p className="font-bold text-emerald-600 text-sm">R$ {(item.quantidade * item.valor_unit).toFixed(2)}</p></div>
-                                            <button onClick={() => solicitarRemocaoItem(item.id)} className="ml-3 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16} /></button>
+                                            <button onClick={() => removerItemConfirmado(item.id)} className="ml-3 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16} /></button>
                                         </div>
                                     ))
                                 )}
@@ -382,8 +388,6 @@ export default function ComandaModal({
             </div>
         )}
       </Modal>
-      
-      <ConfirmacaoModal isOpen={confirmacao.isOpen} onClose={() => setConfirmacao({ ...confirmacao, isOpen: false })} onConfirm={confirmacao.acao} title={confirmacao.title} message={confirmacao.message} tipo={confirmacao.tipo} />
     </>
   );
 };

@@ -1,10 +1,6 @@
 // src/services/categorias.ts
 import { supabase } from '../lib/supabaseClient';
 import { Categoria } from '../types';
-// Se você não tiver tabela 'categorias' no Dexie ainda, pode remover a parte do db local ou adicionar no localDatabase.ts
-// Vou assumir que por enquanto categorias são apenas online ou cacheadas na memória, 
-// mas se quiser salvar no Dexie, precisa adicionar 'categorias' no localDatabase.ts
-import { db } from '../lib/localDatabase'; 
 
 const normalizarCategoria = (c: any): Categoria => ({
     ...c,
@@ -15,7 +11,7 @@ const normalizarCategoria = (c: any): Categoria => ({
 export const categoriasService = {
   
   async listar(isOnline: boolean): Promise<Categoria[]> {
-    if (!isOnline) return []; // Se não tem tabela local de categorias, retorna vazio offline
+    if (!isOnline) return []; 
 
     try {
         const { data, error } = await supabase
@@ -25,7 +21,6 @@ export const categoriasService = {
             .order('nome');
 
         if (error) {
-            // Silencia erro se a tabela não existir ainda (fallback para quem usa banco antigo)
             if (error.code === '42P01') return []; 
             throw error;
         }
@@ -38,7 +33,7 @@ export const categoriasService = {
   },
 
   async criar(isOnline: boolean, nome: string): Promise<Categoria | null> {
-      if (!isOnline) return null; // Criação apenas online por enquanto
+      if (!isOnline) return null; 
 
       const { data, error } = await supabase
         .from('categorias')
@@ -55,7 +50,7 @@ export const categoriasService = {
 
       const { error } = await supabase
         .from('categorias')
-        .update({ ativa: false }) // Soft delete
+        .update({ ativa: false }) 
         .eq('id', id);
 
       if (error) throw error;

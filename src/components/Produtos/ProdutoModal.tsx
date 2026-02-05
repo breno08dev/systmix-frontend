@@ -1,5 +1,5 @@
 // src/components/Produtos/ProdutoModal.tsx
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Modal from '../Shared/Modal';
 import { Produto, Categoria } from '../../types';
 import { produtosService } from '../../services/produtos';
@@ -99,7 +99,6 @@ export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnli
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         
-        {/* Esquerda */}
         <div className="space-y-4">
             <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Nome do Produto *</label>
@@ -134,7 +133,6 @@ export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnli
             </div>
         </div>
 
-        {/* Direita */}
         <div className="space-y-4">
              <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -163,7 +161,6 @@ export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnli
                 </div>
              </div>
              
-             {/* Preview */}
              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 mt-4">
                 <h4 className="text-sm font-bold text-slate-700 mb-2">Resumo</h4>
                 <div className="flex justify-between text-sm mb-1">

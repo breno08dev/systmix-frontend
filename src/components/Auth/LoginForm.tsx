@@ -51,7 +51,7 @@ const LoginForm: React.FC = () => {
             <img 
               src={logoConect}
               alt="Logo ConectNew" 
-              className="w-20 h-auto object-contain" 
+              className="w-32 h-auto object-contain" 
             />
           </div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Bem-vindo de volta</h1>

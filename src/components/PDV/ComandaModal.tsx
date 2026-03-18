@@ -6,6 +6,7 @@ import { Comanda, Produto } from '../../types';
 import { Comprovante } from './Comprovante';
 import { useToast } from '../../contexts/ToastContext';
 import Modal from '../Shared/Modal';
+import { ConfirmacaoModal } from '../Common/ConfirmacaoModal'; // IMPORTADO O MODAL DE CONFIRMAÇÃO
 import { Plus, Minus, Trash2, CreditCard, Banknote, QrCode, Printer, Search, ShoppingCart, User, Clock, Loader2, Receipt, Percent, Package } from 'lucide-react';
 
 const METODOS_PAGAMENTO_COMANDA = {
@@ -50,6 +51,10 @@ export default function ComandaModal({
   const [loadingInicial, setLoadingInicial] = useState(true); 
   const [taxaServico, setTaxaServico] = useState(false);
   
+  // ESTADOS PARA O MODAL DE CONFIRMAÇÃO
+  const [modalConfirmaId, setModalConfirmaId] = useState<string | null>(null);
+  const [showConfirmaFechamento, setShowConfirmaFechamento] = useState(false);
+
   const comprovanteRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
   const { registrarVenda, caixaAberto } = useCaixa();
@@ -97,20 +102,15 @@ export default function ComandaModal({
       
       setCarregando(true);
       try {
-          // 1. Pega o HTML do comprovante
           const content = comprovanteRef.current.outerHTML;
-          
-          // 2. Pega os estilos da página (Tailwind) para o comprovante não sair "pelado"
           const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
               .map(node => node.outerHTML)
               .join('');
 
-          // 3. Verifica se está no Electron
           if (window.electron) {
               await window.electron.imprimir(content, styles);
               addToast('Enviado para impressão.', 'success');
           } else {
-              // Fallback para Web (se abrir no navegador normal)
               const printWindow = window.open('', '', 'width=600,height=600');
               if (printWindow) {
                   printWindow.document.write(`<html><head>${styles}</head><body>${content}</body></html>`);
@@ -130,7 +130,6 @@ export default function ComandaModal({
 
   const adicionarProduto = async (produto: Produto) => {
     if (carregando) return;
-    
     if (produto.estoque <= 0) return addToast('Produto esgotado!', 'error');
 
     setCarregando(true);
@@ -147,9 +146,7 @@ export default function ComandaModal({
          onItemUpdated(comandaAtual.id);
       }
       addToast('Item adicionado!', 'success');
-
     } catch (error: any) {
-      console.error(error);
       addToast(error.message || 'Erro ao adicionar.', 'error');
     } finally {
       setCarregando(false);
@@ -157,52 +154,53 @@ export default function ComandaModal({
   };
 
   const alterarQuantidade = async (itemId: string, novaQuantidade: number) => {
-    if (novaQuantidade < 1) return removerItemConfirmado(itemId);
+    if (novaQuantidade < 1) {
+        setModalConfirmaId(itemId); // Abre modal de confirmação para remover
+        return;
+    }
     
     const itemAtual = comandaAtual.itens?.find(i => i.id === itemId);
-    
     if (itemAtual && novaQuantidade > itemAtual.quantidade) {
         const produtoRef = produtos.find(p => p.id === itemAtual.id_produto);
         const diferenca = novaQuantidade - itemAtual.quantidade;
-        
         if (produtoRef && produtoRef.estoque < diferenca) {
-             addToast(`Estoque insuficiente! Apenas ${produtoRef.estoque} un. disponíveis.`, 'error');
-             return;
+              addToast(`Estoque insuficiente! Apenas ${produtoRef.estoque} un. disponíveis.`, 'error');
+              return;
         }
     }
 
     try {
       await comandasService.atualizarQuantidadeItem(isOnline, comandaAtual.id, itemId, novaQuantidade);
-      
       setComandaAtual(prev => ({
           ...prev,
           itens: (prev.itens || []).map(i => i.id === itemId ? { ...i, quantidade: novaQuantidade } : i)
       }));
       onItemUpdated(comandaAtual.id);
-
     } catch (error) {
       addToast('Erro ao atualizar quantidade.', 'error');
       carregarDadosFrescos(); 
     }
   };
 
-  const removerItemConfirmado = async (itemId: string) => {
-    if (!window.confirm("Remover este item?")) return;
+  const removerItemConfirmado = async () => {
+    if (!modalConfirmaId) return;
     try {
-      await comandasService.removerItem(isOnline, comandaAtual.id, itemId);
+      await comandasService.removerItem(isOnline, comandaAtual.id, modalConfirmaId);
       setComandaAtual(prev => ({
         ...prev,
-        itens: (prev.itens || []).filter(i => i.id !== itemId)
-    }));
+        itens: (prev.itens || []).filter(i => i.id !== modalConfirmaId)
+      }));
       onItemUpdated(comandaAtual.id);
+      addToast('Item removido.', 'success');
     } catch (error) {
       addToast('Erro ao remover item.', 'error');
+    } finally {
+        setModalConfirmaId(null);
     }
   };
   
   const solicitarFechamento = () => {
     if (!caixaAberto) return addToast('O Caixa precisa estar aberto para receber valores!', 'error');
-
     if (totalFinal <= 0) return addToast('Comanda vazia.', 'error');
     
     const valorPago = parseFloat(valorPagamento) || totalFinal;
@@ -210,9 +208,7 @@ export default function ComandaModal({
       return addToast('Valor pago insuficiente.', 'error');
     }
 
-    if(window.confirm(`Confirmar recebimento de R$ ${totalFinal.toFixed(2)} e fechar a mesa?`)){
-        fecharComandaConfirmado();
-    }
+    setShowConfirmaFechamento(true); // ABRE O MODAL DARK
   };
 
   const fecharComandaConfirmado = async () => {
@@ -229,13 +225,13 @@ export default function ComandaModal({
       else if (metodoPagamento.includes('Pix')) metodoCaixa = 'PIX';
       
       await registrarVenda(totalFinal, metodoCaixa);
-
       addToast(`Comanda fechada com sucesso!`, 'success');
       onClose(comandaAtual.id); 
     } catch (error) {
       addToast('Não foi possível fechar a comanda.', 'error');
     } finally {
       setCarregando(false);
+      setShowConfirmaFechamento(false);
     }
   };
 
@@ -253,13 +249,13 @@ export default function ComandaModal({
         {!mostrarPagamento ? (
             <>
                 <div className="flex items-center gap-4">
-                    <button onClick={handlePrint} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Imprimir" disabled={subtotalComanda <= 0}>
+                    <button onClick={handlePrint} className="p-2 text-white hover:text-blue-400 hover:bg-blue-900/30 rounded-lg transition-colors" title="Imprimir" disabled={subtotalComanda <= 0}>
                         <Printer size={20} />
                     </button>
                     <div>
-                        {taxaServico && <p className="text-xs text-slate-400 font-medium">Sub: R$ {subtotalComanda.toFixed(2)} + 10%</p>}
-                        <p className="text-xs font-bold text-slate-500 uppercase">Total Final</p>
-                        <p className="text-2xl font-black text-slate-800">R$ {totalFinal.toFixed(2)}</p>
+                        {taxaServico && <p className="text-xs text-blue-400 font-medium">Sub: R$ {subtotalComanda.toFixed(2)} + 10%</p>}
+                        <p className="text-xs font-bold text-gray-400 uppercase">Total Final</p>
+                        <p className="text-2xl font-black text-white">R$ {totalFinal.toFixed(2)}</p>
                     </div>
                 </div>
                 <button 
@@ -272,7 +268,7 @@ export default function ComandaModal({
             </>
         ) : (
             <div className="w-full flex gap-3">
-                 <button onClick={() => setMostrarPagamento(false)} className="px-4 py-3 border border-slate-300 text-slate-600 font-medium rounded-xl hover:bg-slate-50">Voltar</button>
+                 <button onClick={() => setMostrarPagamento(false)} className="px-4 py-3 border border-[#172554] text-white font-medium rounded-xl hover:bg-[#172554]">Voltar</button>
                  <button onClick={solicitarFechamento} disabled={carregando} className="flex-1 px-4 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 flex items-center justify-center gap-2">
                     {carregando ? <Loader2 className="animate-spin" /> : <Receipt size={20} />} Confirmar Fechamento
                 </button>
@@ -287,99 +283,96 @@ export default function ComandaModal({
 
       <Modal title={`Comanda #${comandaAtual.numero}`} onClose={() => onClose()} footer={modalFooter} maxWidth="max-w-5xl">
         {loadingInicial ? (
-             <div className="h-[500px] flex flex-col items-center justify-center text-slate-400">
+             <div className="h-[500px] flex flex-col items-center justify-center text-gray-400">
                 <Loader2 className="animate-spin mb-2" size={32} />
                 <p>Carregando itens...</p>
              </div>
         ) : (
             <div className="flex flex-col h-[600px]">
-                <div className="flex items-center gap-4 mb-4 pb-4 border-b border-slate-100">
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-sm font-medium">
+                <div className="flex items-center gap-4 mb-4 pb-4 border-b border-[#172554]">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-900/30 text-blue-400 rounded-lg text-sm font-medium">
                         <User size={16} /> {comandaAtual.cliente?.nome || 'Consumidor Final'}
                     </div>
-                    <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg text-sm font-medium">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-[#172554] text-white rounded-lg text-sm font-medium">
                         <Clock size={16} /> Aberto às {formatTimeSafe(comandaAtual.criado_em)}
                     </div>
                 </div>
 
                 {!mostrarPagamento ? (
                     <div className="flex flex-col lg:flex-row gap-6 h-full overflow-hidden">
-                        {/* CATÁLOGO */}
                         <div className="lg:w-1/2 flex flex-col h-full">
                             <div className="relative mb-3">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 h-5 w-5" />
-                                <input type="text" placeholder="Buscar produto..." className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-xl focus:border-indigo-500" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)} autoFocus />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-5 w-5" />
+                                <input type="text" placeholder="Buscar produto..." className="w-full pl-10 pr-4 py-3 bg-black border border-[#172554] rounded-xl text-white focus:border-blue-500" value={termoBusca} onChange={(e) => setTermoBusca(e.target.value)} autoFocus />
                             </div>
                             <div className="flex-1 overflow-y-auto pr-2 space-y-2 custom-scrollbar">
                                 {produtosFiltrados.map(produto => {
                                     const semEstoque = produto.estoque <= 0;
                                     return (
-                                        <button key={produto.id} onClick={() => adicionarProduto(produto)} disabled={carregando || semEstoque} className={`w-full flex items-center justify-between p-3 bg-white border rounded-xl transition-all group text-left shadow-sm ${semEstoque ? 'opacity-60 bg-slate-50' : 'hover:border-indigo-300'}`}>
+                                        <button key={produto.id} onClick={() => adicionarProduto(produto)} disabled={carregando || semEstoque} className={`w-full flex items-center justify-between p-3 bg-[#0B1426] border border-[#172554] rounded-xl transition-all group text-left shadow-sm ${semEstoque ? 'opacity-40' : 'hover:border-blue-500'}`}>
                                             <div className="flex-1">
-                                                <p className="font-semibold text-sm">{produto.nome}</p>
+                                                <p className="font-semibold text-sm text-white">{produto.nome}</p>
                                                 <div className="flex items-center gap-3 mt-1">
-                                                    <p className="text-xs text-slate-500 font-medium">R$ {produto.preco.toFixed(2)}</p>
-                                                    <div className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${semEstoque ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                                                    <p className="text-xs text-blue-400 font-medium">R$ {produto.preco.toFixed(2)}</p>
+                                                    <div className={`flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${semEstoque ? 'bg-rose-900/30 text-rose-500 border-rose-900' : 'bg-emerald-900/30 text-emerald-500 border-emerald-900'}`}>
                                                         <Package size={10} /> {semEstoque ? 'Esgotado' : `${produto.estoque} un.`}
                                                     </div>
                                                 </div>
                                             </div>
-                                            <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-all"><Plus size={18} /></div>
+                                            <div className="w-8 h-8 rounded-lg bg-[#172554] text-white flex items-center justify-center group-hover:bg-blue-600 transition-all"><Plus size={18} /></div>
                                         </button>
                                     );
                                 })}
                             </div>
                         </div>
 
-                        {/* ITENS */}
-                        <div className="lg:w-1/2 flex flex-col h-full bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
-                            <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between">
-                                <div className="font-bold text-slate-700 flex items-center gap-2"><ShoppingCart size={18} /> Itens</div>
-                                <button onClick={() => setTaxaServico(!taxaServico)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border ${taxaServico ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}><Percent size={12} /> 10%</button>
+                        <div className="lg:w-1/2 flex flex-col h-full bg-[#0B1426] rounded-2xl border border-[#172554] overflow-hidden">
+                            <div className="p-3 bg-[#172554] border-b border-[#1E3A8A] flex items-center justify-between">
+                                <div className="font-bold text-white flex items-center gap-2"><ShoppingCart size={18} /> Itens</div>
+                                <button onClick={() => setTaxaServico(!taxaServico)} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${taxaServico ? 'bg-blue-600 text-white border-blue-400' : 'bg-black text-gray-400 border-[#172554]'}`}><Percent size={12} /> 10%</button>
                             </div>
                             <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
                                 {comandaAtual.itens?.length === 0 ? (
-                                    <div className="h-full flex flex-col items-center justify-center text-slate-400"><ShoppingCart size={40} className="mb-2 opacity-20" /><p className="text-sm">Nenhum item adicionado</p></div>
+                                    <div className="h-full flex flex-col items-center justify-center text-gray-400"><ShoppingCart size={40} className="mb-2 opacity-20" /><p className="text-sm">Nenhum item adicionado</p></div>
                                 ) : (
                                     comandaAtual.itens?.map(item => (
-                                        <div key={item.id} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center justify-between">
+                                        <div key={item.id} className="bg-black p-3 rounded-xl border border-[#172554] flex items-center justify-between">
                                             <div className="flex-1 min-w-0 pr-2">
-                                                <p className="font-bold text-slate-800 text-sm truncate">{item.produto?.nome}</p>
-                                                <p className="text-xs text-slate-500">Un: R$ {item.valor_unit.toFixed(2)}</p>
+                                                <p className="font-bold text-white text-sm truncate">{item.produto?.nome}</p>
+                                                <p className="text-xs text-blue-400">Un: R$ {item.valor_unit.toFixed(2)}</p>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <button onClick={() => alterarQuantidade(item.id, item.quantidade - 1)} className="w-6 h-6 flex items-center justify-center bg-slate-100 rounded hover:bg-slate-200"><Minus size={14} /></button>
-                                                <span className="w-6 text-center font-bold text-sm">{item.quantidade}</span>
-                                                <button onClick={() => alterarQuantidade(item.id, item.quantidade + 1)} className="w-6 h-6 flex items-center justify-center bg-slate-100 rounded hover:bg-slate-200"><Plus size={14} /></button>
+                                                <button onClick={() => alterarQuantidade(item.id, item.quantidade - 1)} className="w-6 h-6 flex items-center justify-center bg-[#172554] text-white rounded hover:bg-blue-600"><Minus size={14} /></button>
+                                                <span className="w-6 text-center font-bold text-sm text-white">{item.quantidade}</span>
+                                                <button onClick={() => alterarQuantidade(item.id, item.quantidade + 1)} className="w-6 h-6 flex items-center justify-center bg-[#172554] text-white rounded hover:bg-blue-600"><Plus size={14} /></button>
                                             </div>
-                                            <div className="text-right ml-3 min-w-[60px]"><p className="font-bold text-emerald-600 text-sm">R$ {(item.quantidade * item.valor_unit).toFixed(2)}</p></div>
-                                            <button onClick={() => removerItemConfirmado(item.id)} className="ml-3 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={16} /></button>
+                                            <div className="text-right ml-3 min-w-[60px]"><p className="font-bold text-emerald-500 text-sm">R$ {(item.quantidade * item.valor_unit).toFixed(2)}</p></div>
+                                            <button onClick={() => setModalConfirmaId(item.id)} className="ml-3 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 rounded-lg"><Trash2 size={16} /></button>
                                         </div>
                                     ))
                                 )}
                             </div>
-                            <div className="p-3 bg-slate-100 border-t border-slate-200 text-sm">
-                                <div className="flex justify-between mb-1"><span className="text-slate-500">Subtotal</span><span className="font-semibold">R$ {subtotalComanda.toFixed(2)}</span></div>
-                                {taxaServico && <div className="flex justify-between text-indigo-600"><span className="font-medium">Taxa (10%)</span><span className="font-bold">+ R$ {valorTaxa.toFixed(2)}</span></div>}
+                            <div className="p-3 bg-[#172554] border-t border-[#1E3A8A] text-sm">
+                                <div className="flex justify-between mb-1"><span className="text-gray-300">Subtotal</span><span className="font-semibold text-white">R$ {subtotalComanda.toFixed(2)}</span></div>
+                                {taxaServico && <div className="flex justify-between text-blue-400"><span className="font-medium">Taxa (10%)</span><span className="font-bold">+ R$ {valorTaxa.toFixed(2)}</span></div>}
                             </div>
                         </div>
                     </div>
                 ) : (
-                    /* PAGAMENTO */
                     <div className="flex flex-col h-full animate-[fade-in_0.2s]">
-                        <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2"><CreditCard className="text-indigo-600" /> Método</h3>
+                        <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><CreditCard className="text-blue-500" /> Método</h3>
                         <div className="grid grid-cols-3 gap-4 mb-6">
                             {[{ id: METODOS_PAGAMENTO_COMANDA.DINHEIRO, icon: Banknote, label: 'Dinheiro' }, { id: METODOS_PAGAMENTO_COMANDA.CARTAO, icon: CreditCard, label: 'Cartão' }, { id: METODOS_PAGAMENTO_COMANDA.PIX, icon: QrCode, label: 'PIX' }].map(m => (
-                                <button key={m.id} onClick={() => setMetodoPagamento(m.id)} className={`flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 transition-all ${metodoPagamento === m.id ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200'}`}><m.icon size={28} /><span className="font-bold">{m.label}</span></button>
+                                <button key={m.id} onClick={() => setMetodoPagamento(m.id)} className={`flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 transition-all ${metodoPagamento === m.id ? 'border-blue-500 bg-blue-900/30 text-blue-400' : 'border-[#172554] bg-black text-white hover:border-blue-500'}`}><m.icon size={28} /><span className="font-bold">{m.label}</span></button>
                             ))}
                         </div>
-                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 mt-auto">
-                            <div className="flex justify-between items-end mb-2"><label className="text-sm font-semibold text-slate-500">Total a Pagar</label><span className="text-3xl font-black text-slate-800">R$ {totalFinal.toFixed(2)}</span></div>
+                        <div className="bg-black p-6 rounded-2xl border border-[#172554] mt-auto">
+                            <div className="flex justify-between items-end mb-2"><label className="text-sm font-semibold text-gray-400">Total a Pagar</label><span className="text-3xl font-black text-white">R$ {totalFinal.toFixed(2)}</span></div>
                             {metodoPagamento === METODOS_PAGAMENTO_COMANDA.DINHEIRO && (
-                                <div className="mt-4 pt-4 border-t border-slate-200">
-                                    <label className="block text-sm font-medium text-slate-700 mb-2">Valor Recebido</label>
-                                    <input type="number" step="0.01" value={valorPagamento} onChange={(e) => setValorPagamento(e.target.value)} className="w-full p-4 text-xl font-bold border border-slate-300 rounded-xl" placeholder="0,00" autoFocus />
-                                    {troco > 0 && <div className="flex justify-between items-center mt-4 p-3 bg-emerald-50 text-emerald-800 rounded-xl"><span className="font-bold">Troco:</span><span className="font-black text-xl">R$ {troco.toFixed(2)}</span></div>}
+                                <div className="mt-4 pt-4 border-t border-[#172554]">
+                                    <label className="block text-sm font-medium text-gray-300 mb-2">Valor Recebido</label>
+                                    <input type="number" step="0.01" value={valorPagamento} onChange={(e) => setValorPagamento(e.target.value)} className="w-full p-4 text-xl font-bold bg-black border border-[#172554] text-white rounded-xl focus:border-blue-500" placeholder="0,00" autoFocus />
+                                    {troco > 0 && <div className="flex justify-between items-center mt-4 p-3 bg-emerald-900/30 text-emerald-400 border border-emerald-900 rounded-xl"><span className="font-bold">Troco:</span><span className="font-black text-xl">R$ {troco.toFixed(2)}</span></div>}
                                 </div>
                             )}
                         </div>
@@ -388,6 +381,28 @@ export default function ComandaModal({
             </div>
         )}
       </Modal>
+
+      {/* MODAL DARK DE CONFIRMAÇÃO PARA REMOVER ITEM */}
+      <ConfirmacaoModal 
+        isOpen={!!modalConfirmaId}
+        onClose={() => setModalConfirmaId(null)}
+        onConfirm={removerItemConfirmado}
+        title="Remover Item"
+        message="Tem certeza que deseja remover este produto da comanda?"
+        tipo="perigo"
+        textoConfirmar="Remover"
+      />
+
+      {/* MODAL DARK DE CONFIRMAÇÃO PARA FECHAR COMANDA */}
+      <ConfirmacaoModal 
+        isOpen={showConfirmaFechamento}
+        onClose={() => setShowConfirmaFechamento(false)}
+        onConfirm={fecharComandaConfirmado}
+        title="Fechar Comanda"
+        message={`Deseja confirmar o recebimento de R$ ${totalFinal.toFixed(2)} e encerrar a mesa #${comandaAtual.numero}?`}
+        tipo="sucesso"
+        textoConfirmar="Confirmar e Fechar"
+      />
     </>
   );
 };

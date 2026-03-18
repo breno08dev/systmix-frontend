@@ -13,23 +13,49 @@ import {
   History,
   CalendarDays,
   CalendarRange,
-  Printer
+  FileDown,
+  Filter,
+  Clock // Importado o ícone Clock para o status do Turno
 } from 'lucide-react';
 import { relatoriosService, ResumoFinanceiro } from '../../services/relatorios';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useToast } from '../../contexts/ToastContext';
+import { useCaixa } from '../../contexts/CaixaContext';
+
+// Importação da biblioteca localmente (resolve o problema do Electron e CSP)
+// @ts-ignore - Ignorando tipagem ausente na biblioteca html2pdf.js
+import html2pdf from 'html2pdf.js';
 
 const resumoZerado: ResumoFinanceiro = {
   totalGeral: 0, totalDinheiro: 0, totalPix: 0, totalCartao: 0, qtdVendas: 0, ticketMedio: 0
 };
 
+// Funções utilitárias para lidar com datas ignorando o Fuso Horário (Resolve o bug do dia 10 virar dia 9)
+const getLocalStr = (d: Date) => {
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`; // Retorna exato YYYY-MM-DD local
+};
+
+const formatarDataBr = (dataString: string) => {
+  if (!dataString) return '';
+  const partes = dataString.split('T')[0].split('-');
+  if (partes.length !== 3) return dataString;
+  return `${partes[2]}/${partes[1]}/${partes[0]}`; // Converte direto de YYYY-MM-DD para DD/MM/YYYY
+};
+
 export const Relatorios: React.FC = () => {
+  const { caixaAberto } = useCaixa(); // CORRIGIDO AQUI: Alterado de caixaAtivo para caixaAberto
   const [loading, setLoading] = useState(true);
   const [loadingPdf, setLoadingPdf] = useState(false);
   
-  // Novos estados para filtro de período (De - Até)
-  const [dataInicio, setDataInicio] = useState(new Date().toISOString().split('T')[0]);
-  const [dataFim, setDataFim] = useState(new Date().toISOString().split('T')[0]);
+  // Agora temos as opções 'turno' e 'personalizado' (padrão é Turno Atual)
+  const [tipoFiltro, setTipoFiltro] = useState<'turno' | 'personalizado'>('turno');
+  
+  const hojeStr = getLocalStr(new Date());
+  const [dataInicio, setDataInicio] = useState(hojeStr);
+  const [dataFim, setDataFim] = useState(hojeStr);
   
   const [resumoPeriodo, setResumoPeriodo] = useState<ResumoFinanceiro>(resumoZerado);
   const [resumoOntem, setResumoOntem] = useState<ResumoFinanceiro>(resumoZerado);
@@ -39,34 +65,44 @@ export const Relatorios: React.FC = () => {
   const { isOnline } = useOnlineStatus();
   const { addToast } = useToast();
 
+  // Efeito do Turno: Atravessa a meia-noite corretamente pegando do momento da abertura até Hoje
+  useEffect(() => {
+    if (tipoFiltro === 'turno') {
+      const dataAberturaStr = caixaAberto?.data_abertura 
+        ? getLocalStr(new Date(caixaAberto.data_abertura)) 
+        : getLocalStr(new Date());
+      
+      setDataInicio(dataAberturaStr);
+      setDataFim(getLocalStr(new Date())); // até Hoje, para não perder vendas de madrugada
+    }
+  }, [tipoFiltro, caixaAberto]); // CORRIGIDO AQUI
+
   useEffect(() => {
     carregarDados();
   }, [dataInicio, dataFim, isOnline]);
 
   const carregarDados = async () => {
-    // Validação básica
-    if (new Date(dataFim) < new Date(dataInicio)) {
+    if (dataFim < dataInicio) {
         addToast('A data final não pode ser menor que a inicial.', 'error');
         return;
     }
 
     setLoading(true);
     try {
+      const hoje = getLocalStr(new Date());
+
       const ontemObj = new Date(); 
       ontemObj.setDate(ontemObj.getDate() - 1);
-      const ontem = ontemObj.toISOString().split('T')[0];
+      const ontem = getLocalStr(ontemObj);
 
       const semanaObj = new Date(); 
       semanaObj.setDate(semanaObj.getDate() - 7);
-      const semanaInicio = semanaObj.toISOString().split('T')[0];
+      const semanaInicio = getLocalStr(semanaObj);
 
       const trintaDiasObj = new Date();
       trintaDiasObj.setDate(trintaDiasObj.getDate() - 30);
-      const trintaDiasInicio = trintaDiasObj.toISOString().split('T')[0];
+      const trintaDiasInicio = getLocalStr(trintaDiasObj);
 
-      const hoje = new Date().toISOString().split('T')[0];
-
-      // Busca os dados do período selecionado e os fixos (ontem, 7d, 30d) usando 'hoje' como fim
       const [dadosPeriodo, dadosOntem, dadosSemana, dados30Dias] = await Promise.all([
         relatoriosService.buscarResumoFinanceiro(isOnline, dataInicio, dataFim),
         relatoriosService.buscarResumoFinanceiro(isOnline, ontem, ontem),
@@ -87,72 +123,54 @@ export const Relatorios: React.FC = () => {
     }
   };
 
-  const handleImprimirRelatorio = async () => {
+  const handleSalvarPDF = async () => {
       setLoadingPdf(true);
       try {
-          // Busca o relatório completo (Financeiro + Detalhamento de Produtos)
           const dadosCompletos = await relatoriosService.buscarDetalhamentoRelatorio(isOnline, dataInicio, dataFim);
-          
           const BRL_STR = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
           
-          // Geração do HTML para o PDF
           const htmlImpressao = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <title>Relatório de Vendas</title>
+            <div id="relatorio-pdf-wrapper" style="font-family: Arial, sans-serif; color: #333; padding: 20px; line-height: 1.6; background-color: white;">
                 <style>
-                    body { font-family: Arial, sans-serif; color: #333; padding: 20px; line-height: 1.6; }
-                    .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-                    h1 { margin: 0; font-size: 24px; }
-                    .periodo { font-size: 14px; color: #666; }
-                    .section-title { font-size: 18px; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-top: 30px; margin-bottom: 15px; }
-                    
-                    .resumo-grid { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 30px; }
-                    .resumo-item { background: #f8f9fa; padding: 15px; border-radius: 8px; flex: 1; min-width: 150px; border: 1px solid #eee; }
-                    .resumo-item strong { display: block; font-size: 12px; color: #666; text-transform: uppercase; }
-                    .resumo-item span { display: block; font-size: 20px; font-weight: bold; margin-top: 5px; }
-                    
-                    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-                    th { background-color: #f8f9fa; font-weight: bold; }
+                    .header-pdf { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
+                    .header-pdf h1 { margin: 0; font-size: 24px; }
+                    .periodo-pdf { font-size: 14px; color: #666; }
+                    .section-title-pdf { font-size: 18px; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-top: 30px; margin-bottom: 15px; font-weight: bold;}
+                    .resumo-grid-pdf { display: flex; gap: 20px; margin-bottom: 30px; }
+                    .resumo-item-pdf { background: #f8f9fa; padding: 15px; border-radius: 8px; flex: 1; border: 1px solid #eee; }
+                    .resumo-item-pdf strong { display: block; font-size: 12px; color: #666; text-transform: uppercase; }
+                    .resumo-item-pdf span { display: block; font-size: 20px; font-weight: bold; margin-top: 5px; }
+                    table.pdf-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                    table.pdf-table th, table.pdf-table td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
+                    table.pdf-table th { background-color: #f8f9fa; font-weight: bold; }
                     .text-right { text-align: right; }
                     .text-center { text-align: center; }
-                    
-                    .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #999; }
-                    
-                    @media print {
-                        body { padding: 0; }
-                        button { display: none; }
-                        @page { margin: 1cm; }
-                    }
+                    .footer-pdf { text-align: center; margin-top: 40px; font-size: 12px; color: #999; }
                 </style>
-            </head>
-            <body>
-                <div class="header">
+
+                <div class="header-pdf">
                     <h1>Relatório Financeiro e de Produtos</h1>
-                    <div class="periodo">Período: ${new Date(dataInicio).toLocaleDateString('pt-BR')} até ${new Date(dataFim).toLocaleDateString('pt-BR')}</div>
+                    <div class="periodo-pdf">Período: ${formatarDataBr(dataInicio)} até ${formatarDataBr(dataFim)}</div>
                 </div>
 
-                <div class="section-title">Resumo Financeiro</div>
-                <div class="resumo-grid">
-                    <div class="resumo-item"><strong>Faturamento Total</strong><span>${BRL_STR(dadosCompletos.resumo.totalGeral)}</span></div>
-                    <div class="resumo-item"><strong>Qtd. Vendas</strong><span>${dadosCompletos.resumo.qtdVendas}</span></div>
-                    <div class="resumo-item"><strong>Ticket Médio</strong><span>${BRL_STR(dadosCompletos.resumo.ticketMedio)}</span></div>
+                <div class="section-title-pdf">Resumo Financeiro</div>
+                <div class="resumo-grid-pdf">
+                    <div class="resumo-item-pdf"><strong>Faturamento Total</strong><span>${BRL_STR(dadosCompletos.resumo.totalGeral)}</span></div>
+                    <div class="resumo-item-pdf"><strong>Qtd. Vendas</strong><span>${dadosCompletos.resumo.qtdVendas}</span></div>
+                    <div class="resumo-item-pdf"><strong>Ticket Médio</strong><span>${BRL_STR(dadosCompletos.resumo.ticketMedio)}</span></div>
                 </div>
 
-                <div class="section-title">Detalhamento por Pagamento</div>
-                <table>
+                <div class="section-title-pdf">Detalhamento por Pagamento</div>
+                <table class="pdf-table">
                     <tr><th>Método</th><th class="text-right">Valor Arrecadado</th></tr>
                     <tr><td>Dinheiro</td><td class="text-right">${BRL_STR(dadosCompletos.resumo.totalDinheiro)}</td></tr>
                     <tr><td>PIX</td><td class="text-right">${BRL_STR(dadosCompletos.resumo.totalPix)}</td></tr>
                     <tr><td>Cartão</td><td class="text-right">${BRL_STR(dadosCompletos.resumo.totalCartao)}</td></tr>
                 </table>
 
-                <div class="section-title">Produtos Vendidos (Saída de Estoque)</div>
+                <div class="section-title-pdf">Produtos Vendidos (Saída de Estoque)</div>
                 ${dadosCompletos.produtosVendidos.length > 0 ? `
-                <table>
+                <table class="pdf-table">
                     <thead>
                         <tr>
                             <th>Produto</th>
@@ -172,32 +190,33 @@ export const Relatorios: React.FC = () => {
                 </table>
                 ` : '<p>Nenhum produto registrado neste período.</p>'}
 
-                <div class="footer">Gerado pelo Sistema Systmix em ${new Date().toLocaleString('pt-BR')}</div>
-                
-                <script>
-                    // Auto-imprime ao carregar
-                    window.onload = () => {
-                        window.print();
-                        // Tenta fechar a janela após a impressão (se permitido pelo navegador)
-                        setTimeout(() => { window.close(); }, 500);
-                    };
-                </script>
-            </body>
-            </html>
+                <div class="footer-pdf">Gerado pelo Sistema em ${new Date().toLocaleString('pt-BR')}</div>
+            </div>
           `;
 
-          // Abre uma nova janela invisível/popup para impressão
-          const printWindow = window.open('', '_blank', 'width=800,height=600');
-          if (printWindow) {
-              printWindow.document.write(htmlImpressao);
-              printWindow.document.close();
-          } else {
-              addToast('Bloqueador de pop-ups impediu a impressão.', 'error');
-          }
+          const container = document.createElement('div');
+          container.style.position = 'absolute';
+          container.style.left = '-9999px';
+          container.style.top = '0';
+          container.innerHTML = htmlImpressao;
+          document.body.appendChild(container);
+
+          const element = document.getElementById('relatorio-pdf-wrapper') as HTMLElement;
+          
+          const opt = {
+              margin:       10,
+              filename:     `relatorio_vendas_${dataInicio}.pdf`,
+              image:        { type: 'jpeg' as const, quality: 0.98 },
+              html2canvas:  { scale: 2, useCORS: true },
+              jsPDF:        { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
+          };
+          
+          await html2pdf().set(opt).from(element).save();
+          document.body.removeChild(container);
 
       } catch (error) {
           console.error(error);
-          addToast('Erro ao preparar relatório para impressão.', 'error');
+          addToast('Erro ao preparar relatório para download em PDF.', 'error');
       } finally {
           setLoadingPdf(false);
       }
@@ -216,49 +235,72 @@ export const Relatorios: React.FC = () => {
             <BarChart3 className="text-indigo-600" size={32} />
             Relatório Financeiro
           </h1>
-          <p className="text-slate-500 mt-1">Visão completa do faturamento e métricas.</p>
+          {/* CORRIGIDO AQUI: Alterado de caixaAtivo para caixaAberto */}
+          {tipoFiltro === 'turno' && caixaAberto ? (
+             <p className="text-emerald-600 font-medium mt-1 flex items-center gap-2">
+                <Clock size={16} /> Turno aberto em: {new Date(caixaAberto.data_abertura).toLocaleString('pt-BR')}
+             </p>
+          ) : (
+            <p className="text-slate-500 mt-1">Visão completa do faturamento e métricas.</p>
+          )}
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center gap-3">
-          {/* Controle de Período */}
-          <div className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-200 shadow-sm">
-            <div className="flex items-center gap-2 px-3 text-slate-500 border-r border-slate-200">
-              <Calendar size={18} />
-              <span className="text-sm font-semibold">Período:</span>
+        <div className="flex flex-col xl:flex-row items-start xl:items-center gap-3">
+          {/* Controle de Período Otimizado */}
+          <div className="flex items-center gap-3 bg-white p-2 rounded-xl border border-slate-200 shadow-sm w-full xl:w-auto overflow-x-auto">
+            
+            <div className="flex items-center gap-2 px-3 text-slate-500 border-r border-slate-200 whitespace-nowrap">
+              <Filter size={18} />
+              <select 
+                value={tipoFiltro}
+                onChange={(e) => setTipoFiltro(e.target.value as 'turno' | 'personalizado')}
+                className="outline-none bg-transparent font-semibold text-slate-700 cursor-pointer text-sm"
+              >
+                <option value="turno">Turno Atual</option>
+                <option value="personalizado">Data Personalizada</option>
+              </select>
             </div>
-            <input 
-              type="date" 
-              value={dataInicio}
-              onChange={(e) => setDataInicio(e.target.value)}
-              className="outline-none text-slate-700 font-medium bg-transparent text-sm"
-              title="Data Inicial"
-            />
-            <span className="text-slate-400">até</span>
-            <input 
-              type="date" 
-              value={dataFim}
-              onChange={(e) => setDataFim(e.target.value)}
-              className="outline-none text-slate-700 font-medium bg-transparent text-sm"
-              title="Data Final"
-            />
+
+            {tipoFiltro === 'personalizado' && (
+              <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-4">
+                <input 
+                  type="date" 
+                  value={dataInicio}
+                  onChange={(e) => setDataInicio(e.target.value)}
+                  className="outline-none text-slate-700 font-medium bg-transparent text-sm cursor-pointer"
+                  title="Data Inicial"
+                />
+                <span className="text-slate-400 text-sm">até</span>
+                <input 
+                  type="date" 
+                  value={dataFim}
+                  onChange={(e) => setDataFim(e.target.value)}
+                  className="outline-none text-slate-700 font-medium bg-transparent text-sm cursor-pointer"
+                  title="Data Final"
+                />
+              </div>
+            )}
+
             <button 
               onClick={carregarDados}
-              className="p-2 ml-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors"
+              className="p-2 ml-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg transition-colors flex-shrink-0"
               title="Atualizar dados do período"
             >
               <RefreshCcw size={18} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
 
-          {/* Botão de Imprimir */}
-          <button
-            onClick={handleImprimirRelatorio}
-            disabled={loading || loadingPdf}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl font-medium transition-colors shadow-sm disabled:opacity-50"
-          >
-             {loadingPdf ? <Loader2 size={18} className="animate-spin" /> : <Printer size={18} />}
-             Salvar / Imprimir PDF
-          </button>
+          {/* Botões de Ação */}
+          <div className="flex items-center gap-2 w-full xl:w-auto">
+            <button
+              onClick={handleSalvarPDF}
+              disabled={loading || loadingPdf}
+              className="flex-1 xl:flex-none flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-medium transition-colors shadow-sm disabled:opacity-50 whitespace-nowrap"
+            >
+               {loadingPdf ? <Loader2 size={18} className="animate-spin" /> : <FileDown size={18} />}
+               {loadingPdf ? 'Gerando...' : 'Salvar Relatório em PDF'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -274,7 +316,7 @@ export const Relatorios: React.FC = () => {
              <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div>
                     <p className="text-indigo-100 font-medium mb-1 flex items-center gap-2">
-                        <TrendingUp size={20} /> Faturamento do Período
+                        <TrendingUp size={20} /> Faturamento ({tipoFiltro === 'turno' ? 'do Turno Atual' : 'do Período'})
                     </p>
                     <h2 className="text-5xl font-black tracking-tight mb-2">
                         {BRL(resumoPeriodo.totalGeral)}
@@ -333,7 +375,7 @@ export const Relatorios: React.FC = () => {
           {/* 3. HISTÓRICO E COMPARATIVOS FIXOS */}
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mt-4">
             <History className="text-indigo-600" />
-            Histórico (Baseado em Hoje)
+            Histórico Geral
           </h2>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -342,7 +384,7 @@ export const Relatorios: React.FC = () => {
                     <div className="p-3 bg-white rounded-lg shadow-sm text-slate-600">
                         <CalendarDays size={20} />
                     </div>
-                    <span className="text-xs font-bold bg-slate-200 text-slate-600 px-2 py-1 rounded">24h</span>
+                    <span className="text-xs font-bold bg-slate-200 text-slate-600 px-2 py-1 rounded">ONTEM</span>
                 </div>
                 <div>
                     <p className="text-slate-500 font-medium text-sm">Vendas de Ontem</p>

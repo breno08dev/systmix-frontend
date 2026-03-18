@@ -2,22 +2,171 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =======================================
+   BASE GLOBAL
+   ======================================= */
 @layer base {
   body {
-    /* Agora a classe bg-background funcionará pois foi definida no config */
-    @apply bg-background text-text-main antialiased;
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    @apply bg-black text-white font-sans antialiased;
+    background-color: #000000 !important;
+    color: #ffffff !important;
+    color-scheme: dark;
   }
+
+  /* Tabelas já no padrão dark */
+  table { @apply bg-[#0B1426] !important; }
+  thead th { @apply bg-[#172554] text-white border-[#1E3A8A] !important; }
+  tbody tr { @apply border-[#172554] !important; }
+  tbody tr:hover { @apply bg-[#172554] !important; }
 }
 
-/* Scrollbar personalizada */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  @apply bg-transparent;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-slate-200 rounded-full hover:bg-slate-300 transition-colors;
+/* =======================================
+   COMPONENTES
+   ======================================= */
+@layer components {
+
+  /* =======================================
+     🔥 ANTI-CINZA GLOBAL (O SEGREDO)
+     ======================================= */
+
+  [class*="bg-slate-"], 
+  [class*="bg-gray-"], 
+  [class*="bg-zinc-"], 
+  [class*="bg-neutral-"],
+  .bg-white {
+    background-color: #0B1426 !important;
+  }
+
+  [class*="text-slate-"], 
+  [class*="text-gray-"], 
+  [class*="text-zinc-"] {
+    color: #ffffff !important;
+  }
+
+  [class*="border-slate-"], 
+  [class*="border-gray-"], 
+  [class*="border-zinc-"], 
+  [class*="divide-"] {
+    border-color: #172554 !important;
+  }
+
+  /* Variáveis de libs (shadcn / radix) */
+  .bg-muted, .bg-popover, .bg-secondary, .bg-accent, .bg-card {
+    @apply !bg-[#0B1426] !text-white;
+  }
+
+  /* =======================================
+     ESTRUTURA VISUAL (TEU PADRÃO BONITO)
+     ======================================= */
+
+  .bg-white,
+  .bg-slate-50, .bg-gray-50, .bg-zinc-50,
+  .bg-slate-100, .bg-gray-100, .bg-zinc-100,
+  .bg-slate-200, .bg-gray-200, .bg-zinc-200 {
+    @apply !bg-[#0B1426] !border-[#172554];
+  }
+
+  .hover\:bg-slate-50:hover, .hover\:bg-gray-50:hover,
+  .hover\:bg-slate-100:hover, .hover\:bg-gray-100:hover,
+  .hover\:bg-slate-200:hover, .hover\:bg-gray-200:hover {
+    @apply !bg-[#172554] !border-[#1E3A8A];
+  }
+
+  /* =======================================
+     TEXTOS
+     ======================================= */
+
+  .text-slate-900, .text-gray-900, .text-zinc-900,
+  .text-slate-800, .text-gray-800, .text-zinc-800,
+  .text-slate-700, .text-gray-700, .text-zinc-700,
+  .text-slate-600, .text-gray-600, .text-zinc-600,
+  .text-slate-500, .text-gray-500, .text-zinc-500,
+  .text-slate-400, .text-gray-400, .text-zinc-400 {
+    @apply !text-white !font-medium;
+  }
+
+  /* =======================================
+     INPUTS
+     ======================================= */
+
+  input, select, textarea {
+    @apply !bg-black !text-white !border-[#172554]
+           focus:!border-[#3B82F6]
+           focus:!ring-1 focus:!ring-[#3B82F6]
+           transition-all;
+  }
+
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+  }
+
+  /* =======================================
+     BOTÕES
+     ======================================= */
+
+  .bg-indigo-600, .bg-blue-600 {
+    @apply !bg-[#2563EB] !text-white !border-none;
+  }
+
+  .hover\:bg-indigo-700:hover, .hover\:bg-blue-700:hover {
+    @apply !bg-[#1D4ED8];
+  }
+
+  .bg-indigo-50, .bg-blue-50 {
+    @apply !bg-[#172554] !text-[#60A5FA];
+  }
+
+  /* BOTÕES CINZA (tipo cancelar) */
+  button:not(.bg-blue-600):not(.bg-emerald-600):not(.bg-red-600):not(.bg-indigo-600) {
+    @apply bg-[#172554] text-white border-[#1E3A8A] !important;
+  }
+
+  /* =======================================
+     MODAL / OVERLAY (REMOVE CINZA FANTASMA)
+     ======================================= */
+
+  div[class*="fixed"][class*="inset-0"] {
+    background-color: rgba(0, 0, 0, 0.8) !important;
+    backdrop-filter: blur(4px);
+  }
+
+  /* =======================================
+     CARDS ESPECIAIS
+     ======================================= */
+
+  .bg-emerald-50 { @apply !bg-[#064E3B]/40; }
+  .border-emerald-100, .border-emerald-200 { @apply !border-[#065F46]; }
+  .text-emerald-600, .text-emerald-700 { @apply !text-[#34D399]; }
+
+  .bg-cyan-50 { @apply !bg-[#164E63]/40; }
+  .border-cyan-100, .border-cyan-200 { @apply !border-[#155E75]; }
+  .text-cyan-600, .text-cyan-700 { @apply !text-[#22D3EE]; }
+
+  .bg-purple-50 { @apply !bg-[#581C87]/40; }
+  .border-purple-100, .border-purple-200 { @apply !border-[#6B21A8]; }
+  .text-purple-600, .text-purple-700 { @apply !text-[#C084FC]; }
+
+  .bg-amber-50, .bg-orange-50 { @apply !bg-[#78350F]/40; }
+  .border-amber-100, .border-amber-200 { @apply !border-[#92400E]; }
+  .text-amber-600, .text-amber-700 { @apply !text-[#FBBF24]; }
+
+  .bg-rose-50, .bg-red-50 { @apply !bg-[#881337]/40; }
+  .border-rose-100, .border-rose-200, .border-rose-300 { @apply !border-[#BE123C]; }
+  .text-rose-600, .text-rose-700 { @apply !text-[#FDA4AF]; }
+
+  /* =======================================
+     SOMBRAS
+     ======================================= */
+
+  .shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl {
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.9),
+                0 8px 10px -6px rgba(0, 0, 0, 0.9) !important;
+  }
+
+  /* =======================================
+     GRADIENTES
+     ======================================= */
+
+  .from-indigo-600 { @apply !from-black; }
+  .to-violet-600 { @apply !to-[#0B1426]; }
 }

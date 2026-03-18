@@ -1,78 +1,61 @@
-import { protocol, ipcMain, BrowserWindow, app, net } from "electron";
-import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
-const __filename$1 = fileURLToPath(import.meta.url);
-const __dirname$1 = path.dirname(__filename$1);
-const isDev = process.env.VITE_DEV_SERVER_URL;
-protocol.registerSchemesAsPrivileged([
+import { protocol as f, ipcMain as P, BrowserWindow as h, app as a, net as m } from "electron";
+import e from "path";
+import { fileURLToPath as b, pathToFileURL as w } from "url";
+const R = b(import.meta.url), o = e.dirname(R), d = process.env.VITE_DEV_SERVER_URL;
+f.registerSchemesAsPrivileged([
   {
     scheme: "app",
     privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      allowServiceWorkers: true,
+      standard: !0,
+      secure: !0,
+      supportFetchAPI: !0,
+      allowServiceWorkers: !0,
       // Habilita cache offline
-      corsEnabled: true
+      corsEnabled: !0
     }
   }
 ]);
-let mainWindow = null;
-function createWindow() {
-  const iconPath = isDev ? path.join(__dirname$1, "../public/icon.png") : path.join(__dirname$1, "../dist/icon.png");
-  mainWindow = new BrowserWindow({
+let n = null;
+function u() {
+  const i = d ? e.join(o, "../public/icon.png") : e.join(o, "../dist/icon.png");
+  n = new h({
     width: 1280,
     height: 720,
-    icon: iconPath,
+    icon: i,
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.cjs"),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: false
+      preload: e.join(o, "preload.cjs"),
+      nodeIntegration: !1,
+      contextIsolation: !0,
+      sandbox: !1
     }
-  });
-  mainWindow.setMenuBarVisibility(false);
-  if (isDev) {
-    mainWindow.loadURL(isDev);
-    mainWindow.webContents.openDevTools();
-  } else {
-    mainWindow.loadFile(path.join(__dirname$1, "../dist/index.html"));
-  }
+  }), n.setMenuBarVisibility(!1), d ? (n.loadURL(d), n.webContents.openDevTools()) : n.loadFile(e.join(o, "../dist/index.html"));
 }
-ipcMain.handle("imprimir-silencioso", async (_, { content, styles }) => {
-  const workerWindow = new BrowserWindow({
-    show: false,
-    webPreferences: { nodeIntegration: true }
-  });
-  const html = `<html><head>${styles}</head><body>${content}</body></html>`;
-  await workerWindow.loadURL("data:text/html;charset=utf-8," + encodeURI(html));
-  return new Promise((resolve) => {
-    workerWindow.webContents.print(
-      { silent: false, printBackground: true },
-      (success, errorType) => {
-        if (!success) console.error("Erro na impressão:", errorType);
-        workerWindow.close();
-        resolve(success);
+P.handle("imprimir-silencioso", async (i, { content: r, styles: s }) => {
+  const t = new h({
+    show: !1,
+    webPreferences: { nodeIntegration: !0 }
+  }), l = `<html><head>${s}</head><body>${r}</body></html>`;
+  return await t.loadURL("data:text/html;charset=utf-8," + encodeURI(l)), new Promise((c) => {
+    t.webContents.print(
+      { silent: !1, printBackground: !0 },
+      (p, g) => {
+        p || console.error("Erro na impressão:", g), t.close(), c(p);
       }
     );
   });
 });
-app.whenReady().then(() => {
-  protocol.handle("app", (request) => {
-    const { pathname } = new URL(request.url);
-    const resolvedPath = pathname === "/" ? "index.html" : pathname.slice(1);
-    const distPath = path.join(__dirname$1, "../dist");
-    const finalPath = path.join(distPath, resolvedPath);
-    return net.fetch(pathToFileURL(finalPath).toString()).catch(() => {
-      const indexPath = path.join(distPath, "index.html");
-      return net.fetch(pathToFileURL(indexPath).toString());
+a.whenReady().then(() => {
+  f.handle("app", (i) => {
+    const { pathname: r } = new URL(i.url), s = r === "/" ? "index.html" : r.slice(1), t = e.join(o, "../dist"), l = e.join(t, s);
+    return m.fetch(w(l).toString()).catch(() => {
+      const c = e.join(t, "index.html");
+      return m.fetch(w(c).toString());
     });
-  });
-  createWindow();
+  }), u();
 });
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+a.on("window-all-closed", () => {
+  process.platform !== "darwin" && a.quit();
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+a.on("activate", () => {
+  h.getAllWindows().length === 0 && u();
 });

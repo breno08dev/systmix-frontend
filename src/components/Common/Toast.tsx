@@ -24,7 +24,7 @@ export const Toast: React.FC<ToastProps> = ({ message, type, onClose }) => {
   useEffect(() => {
     const timer = setTimeout(() => {
       onClose();
-    }, 5000); // A notificação desaparece após 5 segundos
+    }, 1000); // A notificação desaparece após 5 segundos
 
     return () => {
       clearTimeout(timer);

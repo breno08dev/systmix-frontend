@@ -3,13 +3,11 @@ import { supabase } from '../lib/supabaseClient';
 import { Produto } from '../types';
 import { db, localDatabaseService } from '../lib/localDatabase';
 
-// Normalizador para garantir tipos corretos vindo do Banco ou do Cache
 const normalizarProduto = (p: any): Produto => ({
     ...p,
     preco: Number(p.preco ?? 0),
     estoque: Number(p.estoque ?? 0),
     ativo: p.ativo ?? true,
-    // Garante que categoria seja string se vier flat, ou objeto se vier join
     categoria: p.categoria || 'Geral' 
 });
 
@@ -20,7 +18,7 @@ export const produtosService = {
       try {
         let produtos: Produto[] = [];
 
-        // 1. Tenta buscar com JOIN (trazendo objeto categoria completo)
+        // 1. Tenta buscar com JOIN
         const { data, error } = await supabase
           .from('produtos')
           .select('*, categoria:categorias(*)') 
@@ -28,8 +26,7 @@ export const produtosService = {
           .order('nome', { ascending: true });
 
         if (error) {
-             console.warn("Tentando fallback de produtos sem join (API instável):", error.message);
-             // Fallback: busca simples se o JOIN falhar
+             console.warn("Tentando fallback de produtos sem join:", error.message);
              const { data: dataSimples, error: errorSimples } = await supabase
                 .from('produtos')
                 .select('*')
@@ -41,50 +38,37 @@ export const produtosService = {
              produtos = (data || []).map(normalizarProduto);
         }
         
-        // 2. ATUALIZAÇÃO DO CACHE LOCAL (Upsert)
+        // 2. Cache Local
         if (produtos.length > 0) {
-            // Salva no Dexie para acesso offline futuro
-            await db.produtos.bulkPut(produtos).catch(e => console.warn('Erro ao atualizar cache produtos:', e));
+            await db.produtos.bulkPut(produtos).catch(e => console.warn('Erro cache produtos:', e));
         }
 
-        // 3. FAXINA (Sync Destrutivo)
-        // Remove do cache local itens que foram deletados no servidor
+        // 3. Limpeza de obsoletos
         try {
             const idsOnline = new Set(produtos.map(p => p.id));
             const idsLocais = await db.produtos.toCollection().primaryKeys();
-
             const paraDeletar = idsLocais.filter(id => {
                 const idStr = String(id);
-                // Deleta SE: (Não está na lista online) E (Não é um item recém-criado offline "local_")
+                // Não deleta se não existe online MAS é novo localmente ('local_')
                 return !idsOnline.has(idStr) && !idStr.startsWith('local_');
             });
-
-            if (paraDeletar.length > 0) {
-                console.log(`[Sync Produtos] Removendo ${paraDeletar.length} itens obsoletos.`);
-                await db.produtos.bulkDelete(paraDeletar);
-            }
-        } catch (cleanupError) {
-            console.warn("Erro ao limpar cache de produtos:", cleanupError);
-        }
+            if (paraDeletar.length > 0) await db.produtos.bulkDelete(paraDeletar);
+        } catch (cleanupError) {}
 
         return produtos;
 
       } catch (error) {
-        console.error("Erro buscar online, mudando para local...", error);
+        console.error("Erro buscar online, usando local...", error);
         return await localDatabaseService.listarProdutosAtivos();
       }
-    } else {
-      // Modo Offline
-      return await localDatabaseService.listarProdutosAtivos();
-    }
+    } 
+    return await localDatabaseService.listarProdutosAtivos();
   },
 
   async criar(isOnline: boolean, produto: any): Promise<Produto> {
-    // Prepara payload garantindo números e strings limpas
     const payload = {
         nome: produto.nome.trim(),
         descricao: produto.descricao,
-        // Converte "10,50" para 10.50 se necessário
         preco: typeof produto.preco === 'string' ? parseFloat(produto.preco.replace(',', '.')) : produto.preco,
         estoque: Number(produto.estoque),
         codigo_barras: produto.codigo_barras,
@@ -100,15 +84,14 @@ export const produtosService = {
             if (error) throw error;
             
             const novoProd = normalizarProduto(data);
-            await db.produtos.put(novoProd); // Atualiza cache imediatamente
+            await db.produtos.put(novoProd); 
             return novoProd;
         } catch (e) {
-            console.error("Erro ao criar online, salvando offline...", e);
-            // Se falhar online (ex: timeout), cai para o return abaixo (offline)
+            console.error("Erro criar produto online:", e);
         }
     }
     
-    // Offline: Cria localmente e o localDatabaseService JÁ adiciona a pending_action 'CRIAR_PRODUTO'
+    // Offline: Cria e já agenda a ação 'CRIAR_PRODUTO' internamente
     return await localDatabaseService.criarProduto(payload as any);
   },
 
@@ -125,39 +108,32 @@ export const produtosService = {
         categoria: produto.categoria || 'Geral'
     };
 
-    if (isOnline) {
+    if (isOnline && !id.startsWith('local_')) {
         try {
             const { error } = await supabase.from('produtos').update(payload).eq('id', id);
             if (error) throw error;
-            
-            // Sucesso Online: Atualiza apenas o cache local
             await db.produtos.update(id, payload);
             return;
         } catch (e) { 
-            console.error("Erro update online, agendando offline...", e);
+            console.error("Erro update produto online:", e);
         }
     }
     
-    // Offline:
-    // 1. Atualiza o dado no Dexie para a UI refletir agora
     await localDatabaseService.atualizarProduto(id, payload);
-    // 2. Agenda a sincronização (Importante: localDatabase.atualizarProduto NÃO agenda sozinho)
     await localDatabaseService.addPendingAction('ATUALIZAR_PRODUTO', { id, produto: payload });
   },
 
   async excluir(isOnline: boolean, id: string): Promise<void> {
-      if (isOnline) {
+      if (isOnline && !id.startsWith('local_')) {
           try {
               const { error } = await supabase.from('produtos').delete().eq('id', id);
               if (error) throw error;
               await db.produtos.delete(id);
               return;
-          } catch (e) { console.error("Erro delete online, agendando offline...", e); }
+          } catch (e) { console.error("Erro delete produto online:", e); }
       }
       
-      // Offline:
       await localDatabaseService.deletarProduto(id);
-      // Agenda a exclusão
       await localDatabaseService.addPendingAction('DELETAR_PRODUTO', { id });
   }
 };

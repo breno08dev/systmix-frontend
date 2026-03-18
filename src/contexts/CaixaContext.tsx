@@ -16,55 +16,97 @@ interface CaixaContextData {
 const CaixaContext = createContext<CaixaContextData>({} as CaixaContextData);
 
 export const CaixaProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [caixaAberto, setCaixaAberto] = useState<Caixa | null>(null);
+  
+ 
+  const [caixaAberto, setCaixaAberto] = useState<Caixa | null>(() => {
+    try {
+      const cached = localStorage.getItem('systmix_caixa_aberto');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [loading, setLoading] = useState(true);
   const { isOnline } = useOnlineStatus();
   const { addToast } = useToast();
 
   useEffect(() => {
-    carregarEstadoCaixa();
+    let mounted = true;
+
+    // 2. OUVINTE DE SESSÃO: Garante que a checagem só ocorra quando 
+    // o Supabase terminar de processar o usuário após o reload
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
+        if (mounted) carregarEstadoCaixa(session);
+      } else if (event === 'SIGNED_OUT') {
+        setCaixaAberto(null);
+        localStorage.removeItem('systmix_caixa_aberto');
+      }
+    });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
   }, [isOnline]);
 
-  const carregarEstadoCaixa = async () => {
+  const carregarEstadoCaixa = async (sessionParam?: any) => {
     setLoading(true);
     try {
-      // 1. Tenta recuperar do LocalStorage (funciona offline)
-      const cachedCaixa = localStorage.getItem('systmix_caixa_aberto');
-      if (cachedCaixa) {
-        setCaixaAberto(JSON.parse(cachedCaixa));
+      if (!isOnline) {
+        setLoading(false);
+        return;
       }
 
-      // 2. Se online, valida e atualiza com o servidor
-      if (isOnline) {
-        const { data: userData } = await supabase.auth.getUser();
-        const userEmail = userData.user?.email;
+      const currentSession = sessionParam || (await supabase.auth.getSession()).data.session;
+      const userEmail = currentSession?.user?.email;
 
-        if (userEmail) {
-          const { data, error } = await supabase
-            .from('caixas')
-            .select('*')
-            .eq('aberto', true)
-            .eq('operador', userEmail)
-            .maybeSingle();
+      if (!userEmail) {
+        setLoading(false);
+        return;
+      }
 
-          if (!error && data) {
-            const caixaMapeado: Caixa = {
-              id: data.id,
-              aberto: data.aberto ?? true,
-              valor_inicial: data.saldo_inicial ?? 0,
-              data_abertura: data.aberto_em ?? new Date().toISOString(),
-              data_fechamento: data.fechado_em,
-              operador: data.operador,
-              saldo_atual_local: data.saldo_atual ?? 0
-            };
+      // CORREÇÃO AQUI: Removemos o .maybeSingle() e usamos order() + limit(1)
+      // Assim, se houver 9 caixas "presos" como abertos, ele pega apenas o mais recente em formato de Array
+      const { data, error } = await supabase
+        .from('caixas')
+        .select('*')
+        .eq('aberto', true)
+        .eq('operador', userEmail)
+        .order('aberto_em', { ascending: false })
+        .limit(1);
 
-            setCaixaAberto(caixaMapeado);
-            localStorage.setItem('systmix_caixa_aberto', JSON.stringify(caixaMapeado));
-          } else if (!data) {
-            setCaixaAberto(null);
-            localStorage.removeItem('systmix_caixa_aberto');
+      if (error) {
+        console.error("Erro ao validar caixa no Supabase. Mantendo estado visual.", error);
+        setLoading(false);
+        return; 
+      }
+
+      // Como limit(1) retorna um Array, verificamos se tem algo dentro dele
+      if (data && data.length > 0) {
+        const caixaData = data[0]; // Pega o primeiro (e mais recente) caixa retornado
+
+        const caixaMapeado: Caixa = {
+          id: caixaData.id,
+          aberto: caixaData.aberto ?? true,
+          valor_inicial: caixaData.saldo_inicial ?? 0,
+          data_abertura: caixaData.aberto_em ?? new Date().toISOString(),
+          data_fechamento: caixaData.fechado_em,
+          operador: caixaData.operador,
+          saldo_atual_local: caixaData.saldo_atual ?? caixaData.saldo_inicial ?? 0 
+        };
+
+        setCaixaAberto(caixaMapeado);
+        localStorage.setItem('systmix_caixa_aberto', JSON.stringify(caixaMapeado));
+      } else {
+        setCaixaAberto((prev) => {
+          if (prev && (String(prev.id).startsWith('local_') || String(prev.id).startsWith('temp_'))) {
+            return prev;
           }
-        }
+          localStorage.removeItem('systmix_caixa_aberto');
+          return null;
+        });
       }
     } catch (error) {
       console.error("Erro ao carregar caixa:", error);
@@ -117,11 +159,10 @@ export const CaixaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const fecharCaixa = async (saldoFinal: number, quebra: number) => {
     if (!caixaAberto) return;
     
-    // Log para fins de auditoria e para resolver o alerta de variável não usada
     console.log(`Fechando caixa ${caixaAberto.id}. Saldo Final: ${saldoFinal}, Quebra: ${quebra}`);
 
     if (isOnline) {
-       if (caixaAberto.id.startsWith('local_')) {
+       if (String(caixaAberto.id).startsWith('local_')) {
           addToast('Caixa offline não pode ser fechado online ainda. Sincronize primeiro.', 'error');
           return;
        }
@@ -130,8 +171,6 @@ export const CaixaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
          aberto: false,
          fechado_em: new Date().toISOString(),
          saldo_atual: saldoFinal,
-         // Se você tiver a coluna 'quebra' ou 'diferenca' no banco, descomente abaixo:
-         // quebra: quebra 
        }).eq('id', caixaAberto.id);
 
        if (error) throw error;
@@ -143,7 +182,7 @@ export const CaixaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const registrarVenda = async (valor: number, metodo: string) => {
-    if (isOnline && caixaAberto && !caixaAberto.id.startsWith('local_')) {
+    if (isOnline && caixaAberto && !String(caixaAberto.id).startsWith('local_')) {
         // Lógica opcional de log online
     }
     console.log(`[Caixa] Venda registrada: R$ ${valor} (${metodo})`);

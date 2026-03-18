@@ -135,7 +135,7 @@ const LoginForm: React.FC = () => {
 
         <div className="mt-8 text-center">
           <p className="text-xs text-slate-400">
-            &copy; 2024 Systmix Tecnologia. Todos os direitos reservados.
+            &copy; 2026 ConectNew. Todos os direitos reservados.
           </p>
         </div>
       </div>

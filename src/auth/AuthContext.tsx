@@ -1,7 +1,7 @@
 // src/auth/AuthContext.tsx
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
-import { supabase } from '../lib/supabaseClient'; // Importamos nosso cliente Supabase
-import { Session, User } from '@supabase/supabase-js'; // Importamos os tipos do Supabase
+import { supabase } from '../lib/supabaseClient'; 
+import { Session, User } from '@supabase/supabase-js'; 
 
 interface AuthContextData {
   user: User | null;
@@ -19,30 +19,48 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Tenta pegar a sessão que já existe (carregamento inicial)
+    // 1. Tenta pegar a sessão existente e TRATA O ERRO de token inválido
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          throw error;
+        }
+
+        setSession(session);
+        setUser(session?.user ?? null);
+      } catch (error) {
+        // Se o token for inválido, fazemos logout para limpar o localStorage
+        console.error("Sessão inválida, limpando dados...", error);
+        await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
     };
 
     getSession();
 
-    // 2. Ouve por mudanças no estado de autenticação (login, logout)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    // 2. Ouve por mudanças
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Tratamento extra para eventos de logout forçado
+      if (event === 'SIGNED_OUT') {
+        setSession(null);
+        setUser(null);
+      } else {
+        setSession(session);
+        setUser(session?.user ?? null);
+      }
     });
 
-    // 3. Limpa a inscrição ao desmontar o componente
     return () => {
       subscription?.unsubscribe();
     };
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    // Usamos o método signInWithPassword do Supabase
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -51,13 +69,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (error) {
       throw new Error(error.message || 'Credenciais inválidas');
     }
-    // O 'onAuthStateChange' listener vai cuidar de atualizar o estado
   };
 
   const signOut = async () => {
-    // Usamos o método signOut do Supabase
     await supabase.auth.signOut();
-    // O 'onAuthStateChange' listener vai cuidar de atualizar o estado
+    // Limpar estados manualmente garante a UI atualizar rápido
+    setSession(null);
+    setUser(null);
   };
 
   const value = {

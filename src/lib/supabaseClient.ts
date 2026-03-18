@@ -11,12 +11,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    // Importante: evita conflitos agressivos de lock no navegador
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: true,
-    // Se o erro de LockManager persistir, você pode forçar o storageKey
-    // storageKey: 'systmix-auth-token',
+    detectSessionInUrl: false, // Pode desligar se não usar login social
+    storageKey: 'systmix-auth-v1', // Nome único para seu app
   },
   // Otimização de queries globais
   db: {

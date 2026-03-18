@@ -1,44 +1,78 @@
-import { ipcMain as h, BrowserWindow as a, app as i } from "electron";
-import e from "path";
-import { fileURLToPath as u } from "url";
-const b = u(import.meta.url), n = e.dirname(b), r = process.env.VITE_DEV_SERVER_URL;
-let o = null;
-function d() {
-  const l = r ? e.join(n, "../public/icon.png") : e.join(n, "../dist/icon.png");
-  o = new a({
+import { protocol, ipcMain, BrowserWindow, app, net } from "electron";
+import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
+const __filename$1 = fileURLToPath(import.meta.url);
+const __dirname$1 = path.dirname(__filename$1);
+const isDev = process.env.VITE_DEV_SERVER_URL;
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "app",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      allowServiceWorkers: true,
+      // Habilita cache offline
+      corsEnabled: true
+    }
+  }
+]);
+let mainWindow = null;
+function createWindow() {
+  const iconPath = isDev ? path.join(__dirname$1, "../public/icon.png") : path.join(__dirname$1, "../dist/icon.png");
+  mainWindow = new BrowserWindow({
     width: 1280,
     height: 720,
-    icon: l,
+    icon: iconPath,
     webPreferences: {
-      preload: e.join(n, "preload.cjs"),
-      // ATENÇÃO: Verifique se no seu build gera .mjs ou .cjs
-      nodeIntegration: !1,
-      contextIsolation: !0,
-      sandbox: !1
-      // Necessário para algumas comunicações
+      preload: path.join(__dirname$1, "preload.cjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false
     }
-  }), o.setMenuBarVisibility(!1), r ? o.loadURL(r) : o.loadFile(e.join(n, "../dist/index.html"));
+  });
+  mainWindow.setMenuBarVisibility(false);
+  if (isDev) {
+    mainWindow.loadURL(isDev);
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname$1, "../dist/index.html"));
+  }
 }
-h.handle("imprimir-silencioso", async (l, { content: c, styles: m }) => {
-  const t = new a({
-    show: !1,
-    webPreferences: { nodeIntegration: !0 }
-  }), p = `
-        <html>
-            <head>${m}</head>
-            <body>${c}</body>
-        </html>
-    `;
-  return await t.loadURL("data:text/html;charset=utf-8," + encodeURI(p)), new Promise((w) => {
-    t.webContents.print({ silent: !1, printBackground: !0 }, (s, f) => {
-      s || console.error("Erro na impressão:", f), t.close(), w(s);
-    });
+ipcMain.handle("imprimir-silencioso", async (_, { content, styles }) => {
+  const workerWindow = new BrowserWindow({
+    show: false,
+    webPreferences: { nodeIntegration: true }
+  });
+  const html = `<html><head>${styles}</head><body>${content}</body></html>`;
+  await workerWindow.loadURL("data:text/html;charset=utf-8," + encodeURI(html));
+  return new Promise((resolve) => {
+    workerWindow.webContents.print(
+      { silent: false, printBackground: true },
+      (success, errorType) => {
+        if (!success) console.error("Erro na impressão:", errorType);
+        workerWindow.close();
+        resolve(success);
+      }
+    );
   });
 });
-i.whenReady().then(d);
-i.on("window-all-closed", () => {
-  process.platform !== "darwin" && i.quit();
+app.whenReady().then(() => {
+  protocol.handle("app", (request) => {
+    const { pathname } = new URL(request.url);
+    const resolvedPath = pathname === "/" ? "index.html" : pathname.slice(1);
+    const distPath = path.join(__dirname$1, "../dist");
+    const finalPath = path.join(distPath, resolvedPath);
+    return net.fetch(pathToFileURL(finalPath).toString()).catch(() => {
+      const indexPath = path.join(distPath, "index.html");
+      return net.fetch(pathToFileURL(indexPath).toString());
+    });
+  });
+  createWindow();
 });
-i.on("activate", () => {
-  a.getAllWindows().length === 0 && d();
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
+});
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });

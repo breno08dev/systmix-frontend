@@ -1,6 +1,6 @@
 // src/components/PDV/PDV.tsx
 import React, { useState, useEffect } from 'react';
-import { ShoppingCart, Wifi, WifiOff, Search, PlusCircle, Clock, ChevronRight } from 'lucide-react';
+import { ShoppingCart, Wifi, WifiOff, Search, PlusCircle, Clock, ChevronRight, Trash2 } from 'lucide-react';
 import { comandasService } from '../../services/comandas';
 import { produtosService } from '../../services/produtos';
 import { clientesService } from '../../services/clientes';
@@ -10,6 +10,10 @@ import { AbrirComandaModal } from './AbrirComandaModal';
 import { useToast } from '../../contexts/ToastContext';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { useSync } from '../../contexts/SyncContext';
+
+// IMPORTAÇÃO DOS MODAIS
+import { ModalSenha } from '../Common/ModalSenha';
+import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
 
 const formatTimeSafe = (dateString: string) => {
   try {
@@ -31,6 +35,11 @@ export const PDV: React.FC = () => {
   const [numeroParaAbrir, setNumeroParaAbrir] = useState<number | null>(null);
   
   const [filtroNumero, setFiltroNumero] = useState('');
+
+  // ESTADOS PARA CONTROLE DE SENHA E EXCLUSÃO DE COMANDA
+  const [modalSenhaAberta, setModalSenhaAberta] = useState(false);
+  const [acaoProtegida, setAcaoProtegida] = useState<(() => void) | null>(null);
+  const [modalConfirmaExclusaoId, setModalConfirmaExclusaoId] = useState<string | null>(null);
 
   const { addToast } = useToast();
   const { isOnline } = useOnlineStatus();
@@ -101,6 +110,31 @@ export const PDV: React.FC = () => {
     ) || 0;
   };
 
+  // ----- LÓGICA DE EXCLUSÃO DE COMANDA COM SENHA -----
+  const solicitarSenha = (acao: () => void) => {
+    setAcaoProtegida(() => acao);
+    setModalSenhaAberta(true);
+  };
+
+  const solicitarExclusaoComanda = (idComanda: string) => {
+    // Pede a senha primeiro. Se acertar, abre o modal de confirmação.
+    solicitarSenha(() => setModalConfirmaExclusaoId(idComanda));
+  };
+
+  const confirmarExclusaoComanda = async () => {
+    if (!modalConfirmaExclusaoId) return;
+    try {
+      await comandasService.excluir(isOnline, modalConfirmaExclusaoId);
+      addToast('Comanda excluída/cancelada com sucesso!', 'success');
+      carregarDados();
+    } catch (error: any) {
+      addToast(error.message || 'Erro ao excluir comanda.', 'error');
+    } finally {
+      setModalConfirmaExclusaoId(null);
+    }
+  };
+  // ---------------------------------------------------
+
   return (
     <div className="p-8 max-w-[1600px] mx-auto min-h-screen flex flex-col gap-8">
       
@@ -148,8 +182,22 @@ export const PDV: React.FC = () => {
                   onClick={() => handleAbrirOuEditarComanda(comanda.numero)}
                   className="group bg-white border border-slate-200 rounded-2xl p-5 cursor-pointer hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 relative overflow-hidden"
                 >
-                  <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <ChevronRight className="text-indigo-400" />
+                  <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+                    {/* Botão de Excluir Comanda */}
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation(); // Evita que abra a comanda ao clicar na lixeira
+                        solicitarExclusaoComanda(comanda.id);
+                      }}
+                      className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 p-1.5 rounded-lg transition-colors"
+                      title="Excluir Comanda"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                    {/* Botão Visual de Abrir */}
+                    <div className="text-indigo-400 p-1.5 rounded-lg">
+                      <ChevronRight size={18} />
+                    </div>
                   </div>
 
                   <div className="flex items-start justify-between mb-4">
@@ -252,6 +300,29 @@ export const PDV: React.FC = () => {
           isOnline={isOnline}
         />
       )}
+
+      {/* MODAL DE SENHA GLOBAL */}
+      <ModalSenha 
+        isOpen={modalSenhaAberta} 
+        onClose={() => setModalSenhaAberta(false)} 
+        onSuccess={() => {
+          if (acaoProtegida) acaoProtegida();
+        }} 
+        titulo="Exclusão Protegida"
+        mensagem="Digite a senha gerencial para excluir/cancelar esta comanda."
+      />
+
+      {/* MODAL DARK DE CONFIRMAÇÃO PARA EXCLUIR A COMANDA INTEIRA */}
+      <ConfirmacaoModal 
+        isOpen={!!modalConfirmaExclusaoId}
+        onClose={() => setModalConfirmaExclusaoId(null)}
+        onConfirm={confirmarExclusaoComanda}
+        title="Cancelar Comanda"
+        message="Tem certeza que deseja cancelar e excluir permanentemente esta comanda?"
+        tipo="perigo"
+        textoConfirmar="Sim, Excluir Comanda"
+      />
+
     </div>
   );
 };

@@ -8,6 +8,7 @@ export interface ResumoFinanceiro {
   totalCartao: number;
   qtdVendas: number;
   ticketMedio: number;
+  totalSangrias: number; // NOVO CAMPO ADICIONADO
 }
 
 export interface ProdutoVendidoDetalhe {
@@ -21,10 +22,14 @@ export interface DetalhamentoRelatorio {
     produtosVendidos: ProdutoVendidoDetalhe[];
 }
 
-// Funções de formatação de data isoladas para uso interno
+// CORREÇÃO: Função agora respeita o horário exato caso receba um Timestamp ISO completo
 const parseDataLocal = (dataStr: string, isFim: boolean = false) => {
+    // Se a data já vier com hora (formato ISO 'T'), nós a utilizamos exatamente como está
+    if (dataStr.includes('T')) {
+        return new Date(dataStr);
+    }
+    
     const [ano, mes, dia] = dataStr.split('-').map(Number);
-    // Cria a data no horário local. Se for fim, vai até o último milissegundo.
     if (isFim) {
         return new Date(ano, mes - 1, dia, 23, 59, 59, 999);
     }
@@ -35,29 +40,50 @@ export const relatoriosService = {
   
   async buscarResumoFinanceiro(isOnline: boolean, dataInicio: string, dataFim: string): Promise<ResumoFinanceiro> {
     if (!isOnline) {
-       return { totalGeral: 0, totalDinheiro: 0, totalPix: 0, totalCartao: 0, qtdVendas: 0, ticketMedio: 0 };
+       return { totalGeral: 0, totalDinheiro: 0, totalPix: 0, totalCartao: 0, qtdVendas: 0, ticketMedio: 0, totalSangrias: 0 };
     }
 
     const start = parseDataLocal(dataInicio, false);
     const end = parseDataLocal(dataFim, true);
 
-    const { data, error } = await supabase
+    // 1. Busca os pagamentos
+    const { data: dataPagamentos, error: errPagamentos } = await supabase
       .from('pagamentos')
       .select('valor, metodo')
       .gte('data', start.toISOString())
       .lte('data', end.toISOString());
 
-    if (error) {
-        console.error("Erro ao buscar pagamentos:", error);
-        throw error;
+    if (errPagamentos) {
+        console.error("Erro ao buscar pagamentos:", errPagamentos);
+        throw errPagamentos;
     }
 
-    const pagamentos = data || [];
+    // 2. Busca as sangrias do período
+    const { data: dataSangrias, error: errSangrias } = await supabase
+      .from('sangrias')
+      .select('valor')
+      .gte('data', start.toISOString())
+      .lte('data', end.toISOString());
+      
+    if (errSangrias) {
+        console.error("Erro ao buscar sangrias:", errSangrias);
+        throw errSangrias;
+    }
 
-    const totalDinheiro = pagamentos.filter(p => p.metodo === 'DINHEIRO').reduce((acc, curr) => acc + Number(curr.valor), 0);
+    const pagamentos = dataPagamentos || [];
+    const sangrias = dataSangrias || [];
+
+    // Calcula as retiradas (Sangrias)
+    const totalSangrias = sangrias.reduce((acc, curr) => acc + Number(curr.valor), 0);
+
+    // Calcula as entradas
+    let totalDinheiro = pagamentos.filter(p => p.metodo === 'DINHEIRO').reduce((acc, curr) => acc + Number(curr.valor), 0);
     const totalPix = pagamentos.filter(p => p.metodo === 'PIX').reduce((acc, curr) => acc + Number(curr.valor), 0);
     const totalCartao = pagamentos.filter(p => p.metodo === 'CARTAO').reduce((acc, curr) => acc + Number(curr.valor), 0);
         
+    // Desconta a sangria do total de dinheiro físico na gaveta
+    totalDinheiro = totalDinheiro - totalSangrias;
+
     const totalGeral = totalDinheiro + totalPix + totalCartao;
     const qtdVendas = pagamentos.length;
 
@@ -67,7 +93,9 @@ export const relatoriosService = {
       totalPix,
       totalCartao,
       qtdVendas,
-      ticketMedio: qtdVendas > 0 ? totalGeral / qtdVendas : 0
+      // Ticket médio usa valor bruto (recolocamos a sangria na soma para calcular o ticket das vendas)
+      ticketMedio: qtdVendas > 0 ? (totalDinheiro + totalSangrias + totalPix + totalCartao) / qtdVendas : 0,
+      totalSangrias
     };
   },
 
@@ -97,11 +125,9 @@ export const relatoriosService = {
         throw itensError;
     }
 
-    // Agrupa e soma as quantidades por produto
     const agrupamento: Record<string, ProdutoVendidoDetalhe> = {};
 
     itensData?.forEach(item => {
-        // Trata o retorno do join (pode ser array dependendo de como o Supabase resolve)
         const produtoObj = Array.isArray(item.produto) ? item.produto[0] : item.produto;
         const nomeProduto = produtoObj?.nome || 'Produto Desconhecido';
         
@@ -119,7 +145,6 @@ export const relatoriosService = {
         }
     });
 
-    // Converte o objeto agrupado em array e ordena por quantidade (mais vendidos primeiro)
     const produtosVendidos = Object.values(agrupamento).sort((a, b) => b.quantidade - a.quantidade);
 
     return {

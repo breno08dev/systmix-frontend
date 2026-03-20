@@ -133,7 +133,6 @@ export const comandasService = {
   },
 
   async adicionarItem(isOnline: boolean, idComanda: string, item: any): Promise<ItemComanda> {
-    // 1. Tenta Online (somente se a comanda já estiver sincronizada)
     if (isOnline && !idComanda.startsWith('local_')) {
         try {
             const { data: produto } = await supabase.from('produtos').select('estoque').eq('id', item.id_produto).maybeSingle();
@@ -162,24 +161,17 @@ export const comandasService = {
             return itemFinal;
         } catch (err) {
             console.error("Erro adicionarItem online:", err);
-            // Cai para o bloco offline abaixo
         }
     } 
 
-    // 2. Lógica Offline INTELIGENTE (Merge/Upsert Local)
-    // Verifica se já existe esse produto na comanda localmente
     const itemExistenteLocal = await db.itensComanda
         .where('id_comanda').equals(idComanda)
         .filter(i => i.id_produto === item.id_produto)
         .first();
 
     if (itemExistenteLocal) {
-        // Se existe, soma a quantidade e cria ação de ATUALIZAR (não ADICIONAR)
         const novaQtd = itemExistenteLocal.quantidade + Number(item.quantidade);
         await db.itensComanda.update(itemExistenteLocal.id, { quantidade: novaQtd });
-        
-        // Remove ações pendentes antigas desse item para não poluir
-        // (Opcional, mas ajuda. O SyncContext já otimiza, mas garantimos aqui)
         
         await localDatabaseService.addPendingAction('ATUALIZAR_QTD_ITEM', {
             id_comanda: idComanda,
@@ -189,7 +181,6 @@ export const comandasService = {
 
         return { ...itemExistenteLocal, quantidade: novaQtd };
     } else {
-        // Se não existe, cria novo
         return await localDatabaseService.adicionarItem(idComanda, item);
     }
   },
@@ -239,27 +230,102 @@ export const comandasService = {
      await localDatabaseService.atualizarQuantidadeItem(idItem, novaQuantidade);
   },
 
-  async fecharComanda(isOnline: boolean, idComanda: string, pagamentos: PagamentoInput[], dataFechamentoOffline?: string): Promise<void> {
+async fecharComanda(isOnline: boolean, idComanda: string, pagamentos: PagamentoInput[], dataFechamentoOffline?: string): Promise<void> {
     const dataFinal = dataFechamentoOffline || new Date().toISOString();
     const formatarMetodo = (m: string) => m.toUpperCase().includes('DINHEIRO') ? 'DINHEIRO' : (m.toUpperCase().includes('PIX') ? 'PIX' : 'CARTAO');
+
+    const pagamentosFormatados = pagamentos.map(p => ({
+        metodo: formatarMetodo(p.metodo),
+        valor: p.valor,
+        data: dataFinal
+    }));
 
     if (isOnline && !idComanda.startsWith('local_')) {
         try {
             const { data: comanda } = await supabase.from('comandas').select('status').eq('id', idComanda).maybeSingle();
             if (!comanda || comanda.status === 'fechada') return;
 
-            await supabase.from('pagamentos').insert(pagamentos.map(p => ({
-                id_comanda: idComanda,
-                metodo: formatarMetodo(p.metodo),
-                valor: p.valor,
-                data: dataFinal
-            })));
+            if (pagamentos.length > 0) {
+                await supabase.from('pagamentos').insert(pagamentos.map(p => ({
+                    id_comanda: idComanda,
+                    metodo: formatarMetodo(p.metodo),
+                    valor: p.valor,
+                    data: dataFinal
+                })));
+            }
             
             await supabase.from('comandas').update({ status: 'fechada', fechado_em: dataFinal }).eq('id', idComanda);
-            await db.comandas.update(idComanda, { status: 'fechada', fechado_em: dataFinal });
+            
+            // CORREÇÃO: Salva os pagamentos localmente para renderizar no Histórico imediatamente
+            await db.comandas.update(idComanda, { status: 'fechada', fechado_em: dataFinal, pagamentos: pagamentosFormatados as any });
             return;
         } catch (e) { console.error("Erro fecharComanda online:", e); }
     }
     await localDatabaseService.fecharComanda(idComanda, pagamentos);
+  },
+
+  async listarFechadasTurno(isOnline: boolean, dataAbertura: string): Promise<Comanda[]> {
+    if (isOnline) {
+      try {
+        const { data } = await supabase
+          .from('comandas')
+          .select(`*, cliente:clientes(*), itens:itens_comanda(*, produto:produtos(*)), pagamentos(*)`)
+          .eq('status', 'fechada')
+          .gte('fechado_em', dataAbertura)
+          .order('fechado_em', { ascending: false });
+        
+        if (data && data.length > 0) return data as Comanda[];
+      } catch (e) {
+        console.error("Erro ao buscar histórico:", e);
+      }
+    }
+    
+    // CORREÇÃO: Fallback Local (Busca do banco do navegador caso internet caia / atrase sincronização)
+    const comandasLocais = await db.comandas
+        .filter(c => c.status === 'fechada' && (c.fechado_em || '') >= dataAbertura)
+        .toArray();
+        
+    for (const c of comandasLocais) {
+        c.itens = await db.itensComanda.where('id_comanda').equals(c.id).toArray();
+        for (const i of c.itens) {
+            const prod = await db.produtos.get(i.id_produto);
+            if (prod) i.produto = prod;
+        }
+        if (c.id_cliente && !c.cliente) {
+            const cli = await db.clientes.get(c.id_cliente);
+            if (cli) c.cliente = cli;
+        }
+        // Garante que se fechou vazia ou offline tenha como renderizar
+        c.pagamentos = c.pagamentos || []; 
+    }
+    
+    // Retorna ordenando as mais recentes primeiro
+    return comandasLocais.sort((a, b) => (b.fechado_em || '').localeCompare(a.fechado_em || '')) as Comanda[];
+  },
+
+ async cancelarComandaFechada(isOnline: boolean, idComanda: string): Promise<void> {
+    // 1. Tenta excluir do banco de dados remoto (Supabase)
+    if (isOnline && !idComanda.startsWith('local_')) {
+      try {
+        // Exclui os pagamentos vinculados para sair do relatório financeiro
+        await supabase.from('pagamentos').delete().eq('id_comanda', idComanda);
+        
+        // Exclui os itens da comanda
+        await supabase.from('itens_comanda').delete().eq('id_comanda', idComanda);
+        
+        // Por fim, exclui a comanda em si
+        await supabase.from('comandas').delete().eq('id', idComanda);
+      } catch (e) {
+        console.error("Erro ao excluir venda do banco de dados remoto:", e);
+      }
+    }
+
+    // 2. Exclui do banco local (Front-end / IndexedDB) independentemente de estar online ou não
+    try {
+      await db.comandas.delete(idComanda);
+      await db.itensComanda.where('id_comanda').equals(idComanda).delete();
+    } catch (e) {
+      console.error("Erro ao excluir venda do banco de dados local:", e);
+    }
   }
 };

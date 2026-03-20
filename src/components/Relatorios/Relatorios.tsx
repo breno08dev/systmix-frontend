@@ -27,7 +27,7 @@ import { useCaixa } from '../../contexts/CaixaContext';
 import html2pdf from 'html2pdf.js';
 
 const resumoZerado: ResumoFinanceiro = {
-  totalGeral: 0, totalDinheiro: 0, totalPix: 0, totalCartao: 0, qtdVendas: 0, ticketMedio: 0
+  totalGeral: 0, totalDinheiro: 0, totalPix: 0, totalCartao: 0, qtdVendas: 0, ticketMedio: 0, totalSangrias: 0
 };
 
 // Funções utilitárias para lidar com datas ignorando o Fuso Horário (Resolve o bug do dia 10 virar dia 9)
@@ -89,6 +89,16 @@ export const Relatorios: React.FC = () => {
 
     setLoading(true);
     try {
+      // CORREÇÃO: Determina as datas exatas dependendo do filtro selecionado
+      let inicioRelatorio = dataInicio;
+      let fimRelatorio = dataFim;
+      
+      // Se for Turno Atual, pega o momento exato de abertura até agora
+      if (tipoFiltro === 'turno' && caixaAberto) {
+          inicioRelatorio = caixaAberto.data_abertura;
+          fimRelatorio = new Date().toISOString(); 
+      }
+
       const hoje = getLocalStr(new Date());
 
       const ontemObj = new Date(); 
@@ -104,7 +114,7 @@ export const Relatorios: React.FC = () => {
       const trintaDiasInicio = getLocalStr(trintaDiasObj);
 
       const [dadosPeriodo, dadosOntem, dadosSemana, dados30Dias] = await Promise.all([
-        relatoriosService.buscarResumoFinanceiro(isOnline, dataInicio, dataFim),
+        relatoriosService.buscarResumoFinanceiro(isOnline, inicioRelatorio, fimRelatorio),
         relatoriosService.buscarResumoFinanceiro(isOnline, ontem, ontem),
         relatoriosService.buscarResumoFinanceiro(isOnline, semanaInicio, hoje),
         relatoriosService.buscarResumoFinanceiro(isOnline, trintaDiasInicio, hoje)
@@ -126,26 +136,46 @@ export const Relatorios: React.FC = () => {
   const handleSalvarPDF = async () => {
       setLoadingPdf(true);
       try {
-          const dadosCompletos = await relatoriosService.buscarDetalhamentoRelatorio(isOnline, dataInicio, dataFim);
+          // CORREÇÃO TAMBÉM NO PDF
+          let inicioRelatorio = dataInicio;
+          let fimRelatorio = dataFim;
+          if (tipoFiltro === 'turno' && caixaAberto) {
+              inicioRelatorio = caixaAberto.data_abertura;
+              fimRelatorio = new Date().toISOString();
+          }
+
+          const dadosCompletos = await relatoriosService.buscarDetalhamentoRelatorio(isOnline, inicioRelatorio, fimRelatorio);
           const BRL_STR = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
           
+          // CSS FORTEMENTE BLINDADO COM !important PARA IGNORAR O TEMA DARK E AS LINHAS AZUIS
           const htmlImpressao = `
-            <div id="relatorio-pdf-wrapper" style="font-family: Arial, sans-serif; color: #333; padding: 20px; line-height: 1.6; background-color: white;">
+            <div id="relatorio-pdf-wrapper" style="font-family: Arial, sans-serif; color: #000000 !important; padding: 20px; line-height: 1.6; background-color: #ffffff !important;">
                 <style>
-                    .header-pdf { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; }
-                    .header-pdf h1 { margin: 0; font-size: 24px; }
-                    .periodo-pdf { font-size: 14px; color: #666; }
-                    .section-title-pdf { font-size: 18px; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-top: 30px; margin-bottom: 15px; font-weight: bold;}
-                    .resumo-grid-pdf { display: flex; gap: 20px; margin-bottom: 30px; }
-                    .resumo-item-pdf { background: #f8f9fa; padding: 15px; border-radius: 8px; flex: 1; border: 1px solid #eee; }
-                    .resumo-item-pdf strong { display: block; font-size: 12px; color: #666; text-transform: uppercase; }
-                    .resumo-item-pdf span { display: block; font-size: 20px; font-weight: bold; margin-top: 5px; }
-                    table.pdf-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                    table.pdf-table th, table.pdf-table td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }
-                    table.pdf-table th { background-color: #f8f9fa; font-weight: bold; }
-                    .text-right { text-align: right; }
-                    .text-center { text-align: center; }
-                    .footer-pdf { text-align: center; margin-top: 40px; font-size: 12px; color: #999; }
+                    #relatorio-pdf-wrapper, #relatorio-pdf-wrapper * { 
+                        background-color: #ffffff !important; 
+                        color: #000000 !important; 
+                        border-color: #dddddd !important; 
+                    }
+                    .header-pdf { text-align: center; border-bottom: 2px solid #000000 !important; padding-bottom: 10px; margin-bottom: 20px; }
+                    .header-pdf h1 { margin: 0; font-size: 24px; font-weight: bold; border: none !important; }
+                    .periodo-pdf { font-size: 14px; color: #444444 !important; border: none !important; }
+                    
+                    .section-title-pdf { font-size: 18px; border-bottom: 1px solid #aaaaaa !important; padding-bottom: 5px; margin-top: 30px; margin-bottom: 15px; font-weight: bold; }
+                    
+                    .resumo-grid-pdf { display: flex; gap: 20px; margin-bottom: 30px; border: none !important; }
+                    .resumo-item-pdf { background-color: #f8f9fa !important; padding: 15px; border-radius: 8px; flex: 1; border: 1px solid #cccccc !important; }
+                    .resumo-item-pdf strong { display: block; font-size: 12px; color: #444444 !important; text-transform: uppercase; border: none !important; }
+                    .resumo-item-pdf span { display: block; font-size: 20px; font-weight: bold; margin-top: 5px; border: none !important; }
+                    
+                    table.pdf-table { width: 100% !important; border-collapse: collapse !important; margin-top: 10px !important; border: none !important; }
+                    table.pdf-table th, table.pdf-table td { padding: 10px !important; text-align: left !important; border-bottom: 1px solid #dddddd !important; }
+                    table.pdf-table th { background-color: #f8f9fa !important; font-weight: bold !important; border-bottom: 2px solid #aaaaaa !important; }
+                    table.pdf-table tr { border: none !important; }
+                    table.pdf-table tr:hover { background-color: #ffffff !important; }
+                    
+                    .text-right { text-align: right !important; }
+                    .text-center { text-align: center !important; }
+                    .footer-pdf { text-align: center; margin-top: 40px; font-size: 12px; color: #777777 !important; border: none !important; }
                 </style>
 
                 <div class="header-pdf">

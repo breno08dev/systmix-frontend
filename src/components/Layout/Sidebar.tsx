@@ -9,13 +9,12 @@ import {
   LogOut, 
   Monitor, 
   Lock, 
-  Unlock 
+  Unlock,
+  History // <--- Adicionado o ícone History
 } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { useCaixa } from '../../contexts/CaixaContext';
 import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
-
-// Importação da Logo
 import logo from '../../assets/logo-bar.png';
 
 export const Sidebar: React.FC = () => {
@@ -36,13 +35,13 @@ export const Sidebar: React.FC = () => {
     { path: '/produtos', icon: Package, label: 'Produtos' },
     { path: '/clientes', icon: Users, label: 'Clientes' },
     { path: '/relatorios', icon: BarChart2, label: 'Relatórios' },
+    { path: '/historico', icon: History, label: 'Histórico' }, // <--- Nova Rota
   ];
 
   return (
     <>
       <aside className="w-64 bg-slate-900 h-screen flex flex-col text-slate-300 transition-all duration-300 shadow-xl z-20 hidden md:flex">
         
-        {/* Logo / Header Centralizado */}
         <div className="p-8 flex flex-col items-center justify-center border-b border-slate-800">
           <img 
             src={logo} 
@@ -54,7 +53,6 @@ export const Sidebar: React.FC = () => {
           </p>
         </div>
 
-        {/* Status do Caixa (Widget) */}
         <div className="px-6 py-4">
           <div className={`p-3 rounded-xl border flex items-center gap-3 ${
             caixaAberto 
@@ -71,7 +69,6 @@ export const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Menu de Navegação */}
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto custom-scrollbar-dark py-2">
           {menuItems.map((item) => (
             <NavLink
@@ -91,7 +88,6 @@ export const Sidebar: React.FC = () => {
           ))}
         </nav>
 
-        {/* Rodapé / User Info */}
         <div className="p-4 border-t border-slate-800 bg-slate-900/50">
            <button 
              onClick={() => setModalSairOpen(true)}
@@ -106,7 +102,6 @@ export const Sidebar: React.FC = () => {
         </div>
       </aside>
 
-      {/* Modal de Confirmação de Logout */}
       <ConfirmacaoModal
         isOpen={modalSairOpen}
         onClose={() => setModalSairOpen(false)}

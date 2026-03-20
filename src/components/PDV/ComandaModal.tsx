@@ -6,7 +6,9 @@ import { Comanda, Produto } from '../../types';
 import { Comprovante } from './Comprovante';
 import { useToast } from '../../contexts/ToastContext';
 import Modal from '../Shared/Modal';
-import { ConfirmacaoModal } from '../Common/ConfirmacaoModal'; // IMPORTADO O MODAL DE CONFIRMAÇÃO
+import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
+import { ModalSenha } from '../Common/ModalSenha'; // IMPORTAÇÃO DO MODAL DE SENHA
+
 import { Plus, Minus, Trash2, CreditCard, Banknote, QrCode, Printer, Search, ShoppingCart, User, Clock, Loader2, Receipt, Percent, Package } from 'lucide-react';
 
 const METODOS_PAGAMENTO_COMANDA = {
@@ -51,9 +53,12 @@ export default function ComandaModal({
   const [loadingInicial, setLoadingInicial] = useState(true); 
   const [taxaServico, setTaxaServico] = useState(false);
   
-  // ESTADOS PARA O MODAL DE CONFIRMAÇÃO
+  // ESTADOS PARA O MODAL DE CONFIRMAÇÃO E SENHA
   const [modalConfirmaId, setModalConfirmaId] = useState<string | null>(null);
   const [showConfirmaFechamento, setShowConfirmaFechamento] = useState(false);
+  
+  const [modalSenhaAberta, setModalSenhaAberta] = useState(false);
+  const [acaoProtegida, setAcaoProtegida] = useState<(() => void) | null>(null);
 
   const comprovanteRef = useRef<HTMLDivElement>(null);
   const { addToast } = useToast();
@@ -77,6 +82,11 @@ export default function ComandaModal({
     } finally {
         setLoadingInicial(false);
     }
+  };
+
+  const solicitarSenha = (acao: () => void) => {
+    setAcaoProtegida(() => acao);
+    setModalSenhaAberta(true);
   };
 
   const subtotalComanda = useMemo(() => {
@@ -153,12 +163,25 @@ export default function ComandaModal({
     }
   };
 
-  const alterarQuantidade = async (itemId: string, novaQuantidade: number) => {
+  // Função intermediária para checar necessidade de senha antes de alterar quantidade
+  const alterarQuantidade = async (itemId: string, novaQuantidade: number, quantidadeAtual: number) => {
     if (novaQuantidade < 1) {
-        setModalConfirmaId(itemId); // Abre modal de confirmação para remover
+        solicitarSenha(() => setModalConfirmaId(itemId)); // Pede senha, depois confirmação
+        return;
+    }
+
+    if (novaQuantidade < quantidadeAtual) {
+        // Se estiver retirando uma quantidade (mas ainda > 0), pede a senha
+        solicitarSenha(() => executarAlteracaoQuantidade(itemId, novaQuantidade));
         return;
     }
     
+    // Se for aumento de quantidade, passa direto
+    executarAlteracaoQuantidade(itemId, novaQuantidade);
+  };
+
+  // Executa a alteração real no banco
+  const executarAlteracaoQuantidade = async (itemId: string, novaQuantidade: number) => {
     const itemAtual = comandaAtual.itens?.find(i => i.id === itemId);
     if (itemAtual && novaQuantidade > itemAtual.quantidade) {
         const produtoRef = produtos.find(p => p.id === itemAtual.id_produto);
@@ -201,31 +224,40 @@ export default function ComandaModal({
   
   const solicitarFechamento = () => {
     if (!caixaAberto) return addToast('O Caixa precisa estar aberto para receber valores!', 'error');
-    if (totalFinal <= 0) return addToast('Comanda vazia.', 'error');
+    if (totalFinal <= 0) {
+        // PERMITE FECHAR COMANDA VAZIA SE NÃO TIVER VALOR
+        fecharComandaConfirmado(true);
+        return;
+    }
     
     const valorPago = parseFloat(valorPagamento) || totalFinal;
     if (metodoPagamento === METODOS_PAGAMENTO_COMANDA.DINHEIRO && valorPago < totalFinal) {
       return addToast('Valor pago insuficiente.', 'error');
     }
 
-    setShowConfirmaFechamento(true); // ABRE O MODAL DARK
+    setShowConfirmaFechamento(true);
   };
 
-  const fecharComandaConfirmado = async () => {
+  const fecharComandaConfirmado = async (vazia = false) => {
     setCarregando(true);
     try {
-      await comandasService.fecharComanda(isOnline, comandaAtual.id, [{
+      const pagamentos = vazia ? [] : [{
         metodo: metodoPagamento,
         valor: totalFinal,
-      }]);
+      }];
+
+      await comandasService.fecharComanda(isOnline, comandaAtual.id, pagamentos);
       
-      let metodoCaixa = 'OUTROS';
-      if (metodoPagamento.includes('Dinheiro')) metodoCaixa = 'DINHEIRO';
-      else if (metodoPagamento.includes('Cartão')) metodoCaixa = 'CARTAO';
-      else if (metodoPagamento.includes('Pix')) metodoCaixa = 'PIX';
-      
-      await registrarVenda(totalFinal, metodoCaixa);
-      addToast(`Comanda fechada com sucesso!`, 'success');
+      if (!vazia) {
+        let metodoCaixa = 'OUTROS';
+        if (metodoPagamento.includes('Dinheiro')) metodoCaixa = 'DINHEIRO';
+        else if (metodoPagamento.includes('Cartão')) metodoCaixa = 'CARTAO';
+        else if (metodoPagamento.includes('Pix')) metodoCaixa = 'PIX';
+        
+        await registrarVenda(totalFinal, metodoCaixa);
+      }
+
+      addToast(vazia ? `Comanda vazia finalizada!` : `Comanda fechada com sucesso!`, 'success');
       onClose(comandaAtual.id); 
     } catch (error) {
       addToast('Não foi possível fechar a comanda.', 'error');
@@ -239,7 +271,7 @@ export default function ComandaModal({
   const troco = valorPagoFloat > totalFinal ? valorPagoFloat - totalFinal : 0;
 
   useEffect(() => {
-    if (mostrarPagamento && !valorPagamento) {
+    if (mostrarPagamento && !valorPagamento && totalFinal > 0) {
       setValorPagamento(totalFinal.toFixed(2));
     }
   }, [mostrarPagamento, totalFinal, valorPagamento]);
@@ -259,11 +291,17 @@ export default function ComandaModal({
                     </div>
                 </div>
                 <button 
-                    onClick={() => setMostrarPagamento(true)}
-                    disabled={totalFinal <= 0 || carregando}
+                    onClick={() => {
+                        if (totalFinal <= 0) {
+                            solicitarFechamento(); // Direto para fechar se estiver vazia
+                        } else {
+                            setMostrarPagamento(true);
+                        }
+                    }}
+                    disabled={carregando}
                     className="px-6 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 flex items-center gap-2 transition-all disabled:opacity-50"
                 >
-                    <Banknote size={20} /> Pagamento
+                    <Banknote size={20} /> {totalFinal <= 0 ? 'Fechar Comanda Vazia' : 'Pagamento'}
                 </button>
             </>
         ) : (
@@ -342,12 +380,14 @@ export default function ComandaModal({
                                                 <p className="text-xs text-blue-400">Un: R$ {item.valor_unit.toFixed(2)}</p>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                <button onClick={() => alterarQuantidade(item.id, item.quantidade - 1)} className="w-6 h-6 flex items-center justify-center bg-[#172554] text-white rounded hover:bg-blue-600"><Minus size={14} /></button>
+                                                {/* Passa a quantidadeAtual no alterarQuantidade */}
+                                                <button onClick={() => alterarQuantidade(item.id, item.quantidade - 1, item.quantidade)} className="w-6 h-6 flex items-center justify-center bg-[#172554] text-white rounded hover:bg-blue-600"><Minus size={14} /></button>
                                                 <span className="w-6 text-center font-bold text-sm text-white">{item.quantidade}</span>
-                                                <button onClick={() => alterarQuantidade(item.id, item.quantidade + 1)} className="w-6 h-6 flex items-center justify-center bg-[#172554] text-white rounded hover:bg-blue-600"><Plus size={14} /></button>
+                                                <button onClick={() => alterarQuantidade(item.id, item.quantidade + 1, item.quantidade)} className="w-6 h-6 flex items-center justify-center bg-[#172554] text-white rounded hover:bg-blue-600"><Plus size={14} /></button>
                                             </div>
                                             <div className="text-right ml-3 min-w-[60px]"><p className="font-bold text-emerald-500 text-sm">R$ {(item.quantidade * item.valor_unit).toFixed(2)}</p></div>
-                                            <button onClick={() => setModalConfirmaId(item.id)} className="ml-3 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 rounded-lg"><Trash2 size={16} /></button>
+                                            {/* Solicitar senha antes de confirmar a remoção completa da lixeira */}
+                                            <button onClick={() => solicitarSenha(() => setModalConfirmaId(item.id))} className="ml-3 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-rose-500 rounded-lg"><Trash2 size={16} /></button>
                                         </div>
                                     ))
                                 )}
@@ -382,6 +422,15 @@ export default function ComandaModal({
         )}
       </Modal>
 
+      {/* MODAL DE SENHA GLOBAL */}
+      <ModalSenha 
+        isOpen={modalSenhaAberta} 
+        onClose={() => setModalSenhaAberta(false)} 
+        onSuccess={() => {
+          if (acaoProtegida) acaoProtegida();
+        }} 
+      />
+
       {/* MODAL DARK DE CONFIRMAÇÃO PARA REMOVER ITEM */}
       <ConfirmacaoModal 
         isOpen={!!modalConfirmaId}
@@ -397,7 +446,7 @@ export default function ComandaModal({
       <ConfirmacaoModal 
         isOpen={showConfirmaFechamento}
         onClose={() => setShowConfirmaFechamento(false)}
-        onConfirm={fecharComandaConfirmado}
+        onConfirm={() => fecharComandaConfirmado(false)}
         title="Fechar Comanda"
         message={`Deseja confirmar o recebimento de R$ ${totalFinal.toFixed(2)} e encerrar a mesa #${comandaAtual.numero}?`}
         tipo="sucesso"

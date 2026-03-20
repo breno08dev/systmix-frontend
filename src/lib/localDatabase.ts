@@ -1,5 +1,5 @@
 import Dexie, { Table } from 'dexie';
-import { Comanda, ItemComanda, Produto, Cliente, PagamentoInput } from '../types';
+import { Comanda, ItemComanda, Produto, Cliente, PagamentoInput, Sangria } from '../types';
 
 // Interfaces (Mantidas)
 export interface Pagamento extends PagamentoInput {
@@ -27,17 +27,20 @@ export class LocalDatabase extends Dexie {
   clientes!: Table<Cliente, string>;
   pagamentos!: Table<Pagamento, string>;
   pending_actions!: Table<PendingAction, number>;
+  sangrias!: Table<Sangria, string>; // <-- ADICIONADO AQUI
 
   constructor() {
     super('SystMixDatabase');
     
-    this.version(3).stores({
+    // <-- VERSÃO ALTERADA PARA 4 E TABELA DE SANGRIAS ADICIONADA
+    this.version(4).stores({
       comandas: 'id, numero, status', 
       itensComanda: 'id, id_comanda, id_produto',
       produtos: 'id, nome, ativo, codigo_barras, descricao', 
       clientes: 'id, nome, telefone, email',
       pagamentos: 'id, id_comanda',
-      pending_actions: '++id, type, criado_em' 
+      pending_actions: '++id, type, criado_em',
+      sangrias: 'id, data' // <-- REGISTRO DA TABELA
     });
 
     // --- PROTEÇÃO DE CICLO DE VIDA ---

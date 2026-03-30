@@ -26,7 +26,6 @@ const otimizarFila = (actions: PendingAction[]) => {
             const novaQtd = payload.quantidade !== undefined ? payload.quantidade : payload.novaQuantidade;
             
             if (idItem && updateMap.has(idItem)) {
-                // Atualiza a ação existente com a qtd mais recente
                 const index = updateMap.get(idItem)!;
                 optimized[index].payload.quantidade = novaQtd;
             } else {
@@ -34,7 +33,6 @@ const otimizarFila = (actions: PendingAction[]) => {
                 updateMap.set(idItem, newLength - 1);
             }
         } 
-        // NOVO: Otimização também para ADICIONAR_ITEM (Segurança Extra)
         else if (action.type === 'ADICIONAR_ITEM') {
             const payload = action.payload;
             const key = `${payload.id_comanda}_${payload.id_produto}`;
@@ -85,13 +83,15 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return;
       }
 
-      // Prioridade ajustada
       const actionsSorted = rawActions.sort((a, b) => {
         const priority: Record<string, number> = { 
+            'ABRIR_CAIXA': 1, 
             'CRIAR_CLIENTE': 1, 'ATUALIZAR_CLIENTE': 1,
             'CRIAR_PRODUTO': 1, 'ATUALIZAR_PRODUTO': 1,
             'CRIAR_COMANDA': 2, 'ADICIONAR_ITEM': 3,
-            'ATUALIZAR_QTD_ITEM': 4, 'REMOVER_ITEM': 5, 'FECHAR_COMANDA': 6
+            'ATUALIZAR_QTD_ITEM': 4, 'REMOVER_ITEM': 5, 'FECHAR_COMANDA': 6,
+            'CRIAR_SANGRIA': 6,
+            'FECHAR_CAIXA': 7 
         };
         const pA = priority[a.type] || 99;
         const pB = priority[b.type] || 99;
@@ -129,8 +129,8 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let payload = JSON.parse(JSON.stringify(action.payload));
     let shouldRemoveAction = true; 
 
-    // Atualiza IDs
-    const fieldsToCheck = ['idComanda', 'id_comanda', 'idCliente', 'id_cliente', 'idItem', 'id_item', 'id_produto', 'id'];
+    // Mapeamento automático de IDs (inclui o id_caixa)
+    const fieldsToCheck = ['idComanda', 'id_comanda', 'idCliente', 'id_cliente', 'idItem', 'id_item', 'id_produto', 'id', 'id_caixa'];
     fieldsToCheck.forEach(field => {
         if (payload[field] && idMap[payload[field]]) {
             payload[field] = idMap[payload[field]];
@@ -141,6 +141,77 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
         switch (action.type) {
+          case 'ABRIR_CAIXA':
+            try {
+                const { id: tempId, data_abertura, operador, valor_inicial } = payload.caixa;
+                const { data, error } = await supabase.from('caixas').insert([{
+                    operador: operador,
+                    saldo_inicial: valor_inicial,
+                    aberto: true,
+                    aberto_em: data_abertura
+                }]).select().single();
+
+                if (error) throw error;
+
+                if (data && tempId) {
+                    idMap[tempId] = data.id;
+                    
+                    const cached = localStorage.getItem('systmix_caixa_aberto');
+                    if (cached) {
+                        const caixaAberto = JSON.parse(cached);
+                        if (caixaAberto.id === tempId) {
+                            caixaAberto.id = data.id;
+                            localStorage.setItem('systmix_caixa_aberto', JSON.stringify(caixaAberto));
+                        }
+                    }
+                }
+            } catch (err) { shouldRemoveAction = false; }
+            break;
+
+          case 'CRIAR_SANGRIA':
+            const idCaixaSangria = payload.id_caixa;
+            
+            if (idCaixaSangria && String(idCaixaSangria).startsWith('local_')) {
+                shouldRemoveAction = false;
+                break;
+            }
+
+            try {
+                const { id: tempIdSangria, id_caixa, valor, motivo, data } = payload;
+                
+                const { error } = await supabase.from('movimentacoes_caixa').insert([{
+                    id_caixa: id_caixa, 
+                    tipo: 'sangria',
+                    valor: valor,
+                    motivo: motivo,
+                    data: data 
+                }]);
+
+                if (error) throw error;
+
+                if (tempIdSangria) {
+                    await db.sangrias.delete(tempIdSangria).catch(() => {});
+                }
+            } catch (err) { 
+                shouldRemoveAction = false; 
+            }
+            break;
+
+          case 'FECHAR_CAIXA':
+            if (payload.id && !String(payload.id).startsWith('local_')) {
+                try {
+                    const { error } = await supabase.from('caixas').update({
+                        aberto: false,
+                        fechado_em: payload.fechado_em,
+                        saldo_atual: payload.saldoFinal,
+                    }).eq('id', payload.id);
+                    if (error) throw error;
+                } catch (e) { shouldRemoveAction = false; }
+            } else { 
+                shouldRemoveAction = false; 
+            }
+            break;
+
           case 'CRIAR_CLIENTE':
             try {
                 const { id: tempId, criado_em, ...dados } = payload.cliente;
@@ -201,7 +272,6 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 
                 if (nova.id && String(nova.id).startsWith('local_')) {
                     await db.comandas.delete(nova.id).catch(() => {});
-                    // Verifica duplicidade online
                     const { data: existente } = await supabase.from('comandas').select('id').eq('numero', payload.numero).eq('status', 'aberta').maybeSingle();
                     if (existente) {
                         if (tempIdCom) idMap[tempIdCom] = existente.id;
@@ -284,7 +354,6 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (shouldRemoveAction && action.id) {
         await localDatabaseService.removePendingAction(action.id);
         
-        // Limpa ações obsoletas (se for update, deleta os updates anteriores do mesmo item)
         if (action.type === 'ATUALIZAR_QTD_ITEM') {
             const idItem = payload.id_item || payload.idItem;
             const staleActions = await db.pending_actions

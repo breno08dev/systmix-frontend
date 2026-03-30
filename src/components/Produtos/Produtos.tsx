@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Edit, Trash2, Tag, Lock, Unlock } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Tag, Lock, Unlock, ChevronLeft, ChevronRight } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
 import { Produto } from '../../types';
 import ProdutoModal from './ProdutoModal';
@@ -10,6 +10,7 @@ import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
 
 // --- CONFIGURAÇÃO DA SENHA ---
 const SENHA_MESTRA = '123123'; 
+const ITENS_POR_PAGINA = 20; // Limite por página
 
 export const Produtos: React.FC = () => {
   // --- ESTADOS DE SEGURANÇA ---
@@ -21,6 +22,7 @@ export const Produtos: React.FC = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [termoBusca, setTermoBusca] = useState('');
   const [loading, setLoading] = useState(true);
+  const [paginaAtual, setPaginaAtual] = useState(1); // Estado da paginação
   
   const [produtoSelecionado, setProdutoSelecionado] = useState<Produto | null>(null);
   const [isProdutoModalOpen, setIsProdutoModalOpen] = useState(false);
@@ -29,6 +31,11 @@ export const Produtos: React.FC = () => {
 
   const { addToast } = useToast();
   const { isOnline } = useOnlineStatus();
+
+  // Volta para a página 1 sempre que o termo de busca mudar
+  useEffect(() => {
+    setPaginaAtual(1);
+  }, [termoBusca]);
 
   // --- FUNÇÕES AUXILIARES ---
   const handleVerificarSenha = (e: React.FormEvent) => {
@@ -59,10 +66,8 @@ export const Produtos: React.FC = () => {
   // --- EFEITO PRINCIPAL (CARGA + SYNC AUTOMÁTICO) ---
   useEffect(() => {
     if (acessoLiberado) {
-      // 1. Carrega inicialmente
       carregarProdutos();
 
-      // 2. OUVINTE DE SINCRONIZAÇÃO (O segredo para atualizar sozinho)
       const handleSyncComplete = () => {
           console.log("♻️ Sync finalizado! Atualizando lista de produtos...");
           carregarProdutos();
@@ -99,12 +104,11 @@ export const Produtos: React.FC = () => {
     }
   };
 
-  // --- FILTRO DE BUSCA ---
+  // --- FILTRO E PAGINAÇÃO ---
   const produtosFiltrados = produtos.filter(p => {
     const termo = termoBusca.toLowerCase();
     const nomeProduto = p.nome.toLowerCase();
     
-    // Verifica se categoria é string ou objeto antes de pegar o nome
     let nomeCategoria = '';
     if (typeof p.categoria === 'string') {
         nomeCategoria = p.categoria.toLowerCase();
@@ -114,6 +118,11 @@ export const Produtos: React.FC = () => {
 
     return nomeProduto.includes(termo) || nomeCategoria.includes(termo);
   });
+
+  const totalPaginas = Math.ceil(produtosFiltrados.length / ITENS_POR_PAGINA);
+  const indiceInicial = (paginaAtual - 1) * ITENS_POR_PAGINA;
+  const indiceFinal = indiceInicial + ITENS_POR_PAGINA;
+  const produtosPaginados = produtosFiltrados.slice(indiceInicial, indiceFinal);
 
   // --- TELA DE BLOQUEIO ---
   if (!acessoLiberado) {
@@ -187,7 +196,7 @@ export const Produtos: React.FC = () => {
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
         <div className="p-4 border-b border-slate-100 bg-slate-50/50">
             <div className="relative max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
@@ -215,10 +224,10 @@ export const Produtos: React.FC = () => {
                 <tbody className="divide-y divide-slate-100">
                     {loading ? (
                         <tr><td colSpan={5} className="p-8 text-center text-slate-400">Carregando estoque...</td></tr>
-                    ) : produtosFiltrados.length === 0 ? (
+                    ) : produtosPaginados.length === 0 ? (
                         <tr><td colSpan={5} className="p-8 text-center text-slate-400">Nenhum produto encontrado.</td></tr>
                     ) : (
-                        produtosFiltrados.map(produto => (
+                        produtosPaginados.map(produto => (
                             <tr key={produto.id} className="hover:bg-slate-50/50 transition-colors group">
                                 <td className="px-6 py-4 font-medium text-slate-900">
                                     {produto.nome}
@@ -262,6 +271,34 @@ export const Produtos: React.FC = () => {
                 </tbody>
             </table>
         </div>
+
+        {/* CONTROLES DE PAGINAÇÃO */}
+        {!loading && produtosFiltrados.length > 0 && (
+          <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50 mt-auto">
+            <span className="text-sm text-slate-500">
+              Mostrando <span className="font-medium text-slate-700">{indiceInicial + 1}</span> a <span className="font-medium text-slate-700">{Math.min(indiceFinal, produtosFiltrados.length)}</span> de <span className="font-medium text-slate-700">{produtosFiltrados.length}</span> produtos
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPaginaAtual(p => Math.max(1, p - 1))}
+                disabled={paginaAtual === 1}
+                className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <span className="text-sm font-medium text-slate-700 px-2">
+                Página {paginaAtual} de {totalPaginas}
+              </span>
+              <button
+                onClick={() => setPaginaAtual(p => Math.min(totalPaginas, p + 1))}
+                disabled={paginaAtual === totalPaginas}
+                className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {isProdutoModalOpen && (

@@ -1,7 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import { Comanda, ItemComanda, Produto, Cliente, PagamentoInput, Sangria } from '../types';
 
-// Interfaces (Mantidas)
 export interface Pagamento extends PagamentoInput {
   id: string;
   id_comanda: string;
@@ -27,12 +26,11 @@ export class LocalDatabase extends Dexie {
   clientes!: Table<Cliente, string>;
   pagamentos!: Table<Pagamento, string>;
   pending_actions!: Table<PendingAction, number>;
-  sangrias!: Table<Sangria, string>; // <-- ADICIONADO AQUI
+  sangrias!: Table<Sangria, string>;
 
   constructor() {
     super('SystMixDatabase');
     
-    // <-- VERSÃO ALTERADA PARA 4 E TABELA DE SANGRIAS ADICIONADA
     this.version(4).stores({
       comandas: 'id, numero, status', 
       itensComanda: 'id, id_comanda, id_produto',
@@ -40,11 +38,9 @@ export class LocalDatabase extends Dexie {
       clientes: 'id, nome, telefone, email',
       pagamentos: 'id, id_comanda',
       pending_actions: '++id, type, criado_em',
-      sangrias: 'id, data' // <-- REGISTRO DA TABELA
+      sangrias: 'id, data' 
     });
 
-    // --- PROTEÇÃO DE CICLO DE VIDA ---
-    // Se outra aba atualizar o banco, recarrega para evitar DatabaseClosedError
     this.on('versionchange', () => {
         console.warn('CRÍTICO: Banco atualizado em outra aba. Reiniciando...');
         window.location.reload();
@@ -57,12 +53,8 @@ export class LocalDatabase extends Dexie {
   }
 }
 
-// 1. SINGLETON (Única instância)
 export const db = new LocalDatabase();
 
-// --- LÓGICA DE RETRY E RESET (Self-Healing) ---
-
-// Função para tentar recuperar o banco em caso de falha catastrófica
 const resetDatabase = async () => {
     console.error("⚠️ INICIANDO RESET DE EMERGÊNCIA DO BANCO DE DADOS ⚠️");
     try {
@@ -72,7 +64,6 @@ const resetDatabase = async () => {
         await db.open();
     } catch (e) {
         console.error("FALHA FATAL AO RESETAR BANCO:", e);
-        // Último recurso: recarregar a página para limpar locks do navegador
         window.location.reload();
     }
 };
@@ -86,11 +77,10 @@ const ensureDbOpen = async (retryCount = 0): Promise<void> => {
         console.warn(`Tentativa de abertura ${retryCount + 1} falhou:`, err);
         
         if (retryCount < 2) {
-            await new Promise(r => setTimeout(r, 200)); // Espera 200ms
+            await new Promise(r => setTimeout(r, 200)); 
             return ensureDbOpen(retryCount + 1);
         }
 
-        // Se for erro de versão ou bloqueio persistente, reseta
         if (err.name === 'VersionError' || err.name === 'OpenFailedError') {
             await resetDatabase();
         } else {
@@ -99,13 +89,11 @@ const ensureDbOpen = async (retryCount = 0): Promise<void> => {
     }
 };
 
-// Wrapper genérico para transações seguras
 async function executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
     try {
         await ensureDbOpen();
         return await operation();
     } catch (error: any) {
-        // Se o erro for DatabaseClosed, tenta reabrir e executa uma vez mais
         if (error.name === 'DatabaseClosedError' || error.message?.includes('closed')) {
             console.warn("DatabaseClosedError detectado. Tentando reabrir e repetir...");
             try {
@@ -122,13 +110,11 @@ async function executeWithRetry<T>(operation: () => Promise<T>): Promise<T> {
 
 const createLocalId = () => `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-// 2. SERVIÇO REFATORADO COM WRAPPER
 export const localDatabaseService = {
   
   async addPendingAction(type: string, payload: any): Promise<void> {
     await executeWithRetry(async () => {
         await db.transaction('rw', db.pending_actions, async () => {
-            // Lógica de deduplicação mantida
             const lastAction = await db.pending_actions.orderBy('criado_em').last();
             if (lastAction) {
                 const isSameType = lastAction.type === type;
@@ -159,6 +145,28 @@ export const localDatabaseService = {
     if (!id) return;
     await executeWithRetry(async () => {
         await db.pending_actions.delete(id);
+    });
+  },
+
+  async registrarSangria(sangriaInput: Omit<Sangria, 'id' | 'data'>): Promise<Sangria> {
+    const idLocal = createLocalId();
+    const novaSangria: Sangria = { 
+        ...sangriaInput, 
+        id: idLocal, 
+        data: new Date().toISOString() 
+    };
+    
+    return executeWithRetry(async () => {
+        await db.transaction('rw', [db.sangrias, db.pending_actions], async () => {
+            await db.sangrias.add(novaSangria);
+            await db.pending_actions.add({
+                type: 'CRIAR_SANGRIA',
+                payload: novaSangria,
+                criado_em: Date.now(),
+                tentativas: 0
+            });
+        });
+        return novaSangria;
     });
   },
 
@@ -305,7 +313,6 @@ export const localDatabaseService = {
     });
   },
 
-  // Wrappers simples com retry
   async listarProdutos(): Promise<Produto[]> { return executeWithRetry(() => db.produtos.toArray()); },
   async listarProdutosAtivos(): Promise<Produto[]> { return executeWithRetry(() => db.produtos.filter(p => p.ativo === true).toArray()); },
   

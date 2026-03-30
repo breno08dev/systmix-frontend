@@ -1,12 +1,14 @@
 // src/components/Clientes/Clientes.tsx
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Search, Edit, Trash2, Users, Phone, Mail, Loader2, User, Calendar } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Users, Phone, Mail, Loader2, User, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { clientesService } from '../../services/clientes';
 import { Cliente } from '../../types';
 import { ClienteModal } from './ClienteModal';
 import { useToast } from '../../contexts/ToastContext';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
+
+const ITENS_POR_PAGINA = 20; // Limite por página
 
 // Função simples para formatar a data de criação
 const formatarData = (dataISO?: string) => {
@@ -22,6 +24,7 @@ export const Clientes: React.FC = () => {
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [termoBusca, setTermoBusca] = useState('');
   const [loading, setLoading] = useState(true);
+  const [paginaAtual, setPaginaAtual] = useState(1); // Estado da paginação
   
   const [clienteSelecionado, setClienteSelecionado] = useState<Cliente | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -29,6 +32,11 @@ export const Clientes: React.FC = () => {
 
   const { addToast } = useToast();
   const { isOnline } = useOnlineStatus();
+
+  // Volta para a página 1 sempre que o termo de busca mudar
+  useEffect(() => {
+    setPaginaAtual(1);
+  }, [termoBusca]);
 
   // useCallback para permitir o refresh seguro
   const carregarClientes = useCallback(async () => {
@@ -48,7 +56,6 @@ export const Clientes: React.FC = () => {
   useEffect(() => {
     carregarClientes();
 
-    // OUVE O EVENTO DE SYNC FINALIZADO PARA ATUALIZAR SOZINHO
     const handleSyncComplete = () => {
         console.log("♻️ Sync finalizado! Atualizando clientes...");
         carregarClientes();
@@ -74,7 +81,8 @@ export const Clientes: React.FC = () => {
   const handleDeletarCliente = async () => {
     if (!clienteParaDeletar) return;
     try {
-      await clientesService.excluir(isOnline, clienteParaDeletar);
+      // 👇 MUDE AQUI de excluir para deletar
+      await clientesService.deletar(isOnline, clienteParaDeletar);
       setClientes(prev => prev.filter(c => c.id !== clienteParaDeletar));
       addToast('Cliente removido com sucesso!', 'success');
     } catch (error) {
@@ -84,6 +92,7 @@ export const Clientes: React.FC = () => {
     }
   };
 
+  // --- FILTRO E PAGINAÇÃO ---
   const clientesFiltrados = useMemo(() => {
     const termo = termoBusca.toLowerCase();
     return clientes.filter(c => 
@@ -92,6 +101,11 @@ export const Clientes: React.FC = () => {
       (c.email && c.email.toLowerCase().includes(termo))
     );
   }, [clientes, termoBusca]);
+
+  const totalPaginas = Math.ceil(clientesFiltrados.length / ITENS_POR_PAGINA);
+  const indiceInicial = (paginaAtual - 1) * ITENS_POR_PAGINA;
+  const indiceFinal = indiceInicial + ITENS_POR_PAGINA;
+  const clientesPaginados = clientesFiltrados.slice(indiceInicial, indiceFinal);
 
   return (
     <div className="p-4 md:p-6 max-w-[1920px] mx-auto min-h-screen flex flex-col gap-6">
@@ -135,7 +149,7 @@ export const Clientes: React.FC = () => {
             <Loader2 className="animate-spin mb-4 text-indigo-500" size={40} />
             <p className="font-medium">Carregando contatos...</p>
         </div>
-      ) : clientesFiltrados.length === 0 ? (
+      ) : clientesPaginados.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center min-h-[300px] bg-white rounded-3xl border border-slate-200 border-dashed p-8">
             <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 text-slate-300">
                 <Users size={32} />
@@ -146,64 +160,94 @@ export const Clientes: React.FC = () => {
             </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
-            {clientesFiltrados.map(cliente => (
-                <div 
-                    key={cliente.id} 
-                    className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-xl hover:shadow-indigo-500/5 hover:border-indigo-200 transition-all group flex flex-col h-full relative"
-                >
-                    {/* Topo: Ícone e Ações */}
-                    <div className="flex items-start justify-between mb-4">
-                        <div className="w-12 h-12 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
-                            <User size={24} />
-                        </div>
-
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button 
-                                onClick={() => handleEditarCliente(cliente)}
-                                className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                                title="Editar"
-                            >
-                                <Edit size={18} />
-                            </button>
-                            <button 
-                                onClick={() => setClienteParaDeletar(cliente.id)}
-                                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                                title="Excluir"
-                            >
-                                <Trash2 size={18} />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Dados Principais */}
-                    <div className="mb-4">
-                        <h3 className="text-base font-bold text-slate-800 truncate mb-1" title={cliente.nome}>
-                            {cliente.nome}
-                        </h3>
-                        {cliente.criado_em && (
-                            <div className="flex items-center gap-1 text-xs text-slate-400 font-medium">
-                                <Calendar size={12} />
-                                <span>Cliente desde {formatarData(cliente.criado_em)}</span>
+        <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
+                {clientesPaginados.map(cliente => (
+                    <div 
+                        key={cliente.id} 
+                        className="bg-white rounded-2xl border border-slate-200 p-5 hover:shadow-xl hover:shadow-indigo-500/5 hover:border-indigo-200 transition-all group flex flex-col h-full relative"
+                    >
+                        {/* Topo: Ícone e Ações */}
+                        <div className="flex items-start justify-between mb-4">
+                            <div className="w-12 h-12 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-center text-indigo-600">
+                                <User size={24} />
                             </div>
-                        )}
-                    </div>
 
-                    {/* Detalhes de Contato */}
-                    <div className="space-y-3 pt-2 border-t border-slate-50">
-                        <div className="flex items-center gap-3 text-slate-600 text-sm">
-                            <Phone size={16} className="text-slate-400 shrink-0" />
-                            <span className="truncate font-medium">{cliente.telefone || 'Sem telefone'}</span>
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button 
+                                    onClick={() => handleEditarCliente(cliente)}
+                                    className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                    title="Editar"
+                                >
+                                    <Edit size={18} />
+                                </button>
+                                <button 
+                                    onClick={() => setClienteParaDeletar(cliente.id)}
+                                    className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                    title="Excluir"
+                                >
+                                    <Trash2 size={18} />
+                                </button>
+                            </div>
                         </div>
-                        
-                        <div className="flex items-center gap-3 text-slate-600 text-sm">
-                            <Mail size={16} className="text-slate-400 shrink-0" />
-                            <span className="truncate">{cliente.email || 'Sem e-mail'}</span>
+
+                        {/* Dados Principais */}
+                        <div className="mb-4">
+                            <h3 className="text-base font-bold text-slate-800 truncate mb-1" title={cliente.nome}>
+                                {cliente.nome}
+                            </h3>
+                            {cliente.criado_em && (
+                                <div className="flex items-center gap-1 text-xs text-slate-400 font-medium">
+                                    <Calendar size={12} />
+                                    <span>Cliente desde {formatarData(cliente.criado_em)}</span>
+                                </div>
+                            )}
                         </div>
+
+                        {/* Detalhes de Contato */}
+                        <div className="space-y-3 pt-2 border-t border-slate-50">
+                            <div className="flex items-center gap-3 text-slate-600 text-sm">
+                                <Phone size={16} className="text-slate-400 shrink-0" />
+                                <span className="truncate font-medium">{cliente.telefone || 'Sem telefone'}</span>
+                            </div>
+                            
+                            <div className="flex items-center gap-3 text-slate-600 text-sm">
+                                <Mail size={16} className="text-slate-400 shrink-0" />
+                                <span className="truncate">{cliente.email || 'Sem e-mail'}</span>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* CONTROLES DE PAGINAÇÃO */}
+            {clientesFiltrados.length > 0 && (
+                <div className="bg-white rounded-xl border border-slate-200 p-4 flex items-center justify-between mt-auto">
+                    <span className="text-sm text-slate-500">
+                        Mostrando <span className="font-medium text-slate-700">{indiceInicial + 1}</span> a <span className="font-medium text-slate-700">{Math.min(indiceFinal, clientesFiltrados.length)}</span> de <span className="font-medium text-slate-700">{clientesFiltrados.length}</span> clientes
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setPaginaAtual(p => Math.max(1, p - 1))}
+                            disabled={paginaAtual === 1}
+                            className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        >
+                            <ChevronLeft size={18} />
+                        </button>
+                        <span className="text-sm font-medium text-slate-700 px-2">
+                            Página {paginaAtual} de {totalPaginas}
+                        </span>
+                        <button
+                            onClick={() => setPaginaAtual(p => Math.min(totalPaginas, p + 1))}
+                            disabled={paginaAtual === totalPaginas}
+                            className="p-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        >
+                            <ChevronRight size={18} />
+                        </button>
                     </div>
                 </div>
-            ))}
-        </div>
+            )}
+        </>
       )}
 
       {/* MODAL DE CADASTRO/EDIÇÃO */}

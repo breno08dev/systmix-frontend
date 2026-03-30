@@ -77,7 +77,9 @@ export interface Caixa {
 
 export interface Sangria {
   id: string;
+  id_caixa?: string;
   valor: number;
   motivo: string;
   data: string;
 }
+

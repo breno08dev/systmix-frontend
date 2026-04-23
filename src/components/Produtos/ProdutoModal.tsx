@@ -4,21 +4,25 @@ import Modal from '../Shared/Modal';
 import { Produto, Categoria } from '../../types';
 import { produtosService } from '../../services/produtos';
 import { categoriasService } from '../../services/categorias';
+import { logsService } from '../../services/logs'; // <-- Importando o serviço de logs
 import { useToast } from '../../contexts/ToastContext';
-import { Package, CheckCircle, Loader2, DollarSign, Layers } from 'lucide-react';
+import { Package, CheckCircle, Loader2, DollarSign, Layers, Barcode, RefreshCw } from 'lucide-react';
 
 interface ProdutoModalProps {
   produtoInicial?: Produto;
   onClose: () => void;
   onSalvar: () => void;
   isOnline: boolean;
+  // <-- Recebendo o usuário autorizado para o log
+  usuarioAutorizado: { id: string; nome: string; }; 
 }
 
-export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnline }: ProdutoModalProps) {
+export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnline, usuarioAutorizado }: ProdutoModalProps) {
   const [nome, setNome] = useState(produtoInicial?.nome || '');
   const [preco, setPreco] = useState(produtoInicial?.preco?.toString() || '');
   const [estoque, setEstoque] = useState(produtoInicial?.estoque?.toString() || '');
   const [idCategoria, setIdCategoria] = useState(produtoInicial?.id_categoria || '');
+  const [codigoBarras, setCodigoBarras] = useState(produtoInicial?.codigo_barras || '');
   
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(false);
@@ -37,6 +41,15 @@ export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnli
     }
   };
 
+  // Função para gerar os 13 dígitos do Código de Barras (começando com 789)
+  const gerarCodigoBarras = () => {
+    let codigo = '789';
+    for (let i = 0; i < 10; i++) {
+      codigo += Math.floor(Math.random() * 10).toString();
+    }
+    setCodigoBarras(codigo);
+  };
+
   const handleSalvar = async () => {
     if (!nome.trim()) return addToast('O nome é obrigatório.', 'error');
     if (!preco) return addToast('O preço é obrigatório.', 'error');
@@ -50,14 +63,31 @@ export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnli
         preco, 
         estoque,
         id_categoria: idCategoria,
+        codigo_barras: codigoBarras, // Enviando pro banco
         ativo: true
       };
 
       if (produtoInicial) {
         await produtosService.atualizar(isOnline, produtoInicial.id, produtoDados);
+        
+        // REGISTRO NO LOG: Atualização
+        await logsService.registrar(
+          usuarioAutorizado,
+          'ATUALIZAR_PRODUTO',
+          `Produto atualizado: "${nome}". Preço: R$ ${preco} | Estoque: ${estoque} un | EAN: ${codigoBarras || 'N/A'}.`
+        );
+
         addToast('Produto atualizado!', 'success');
       } else {
         await produtosService.criar(isOnline, produtoDados);
+        
+        // REGISTRO NO LOG: Criação
+        await logsService.registrar(
+          usuarioAutorizado,
+          'CRIAR_PRODUTO',
+          `Novo produto cadastrado: "${nome}". Preço: R$ ${preco} | Estoque: ${estoque} un | EAN: ${codigoBarras || 'N/A'}.`
+        );
+
         addToast('Produto criado!', 'success');
       }
       
@@ -131,6 +161,32 @@ export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnli
                     </select>
                  </div>
             </div>
+
+            {/* NOVO CAMPO: CÓDIGO DE BARRAS */}
+            <div>
+                 <label className="block text-sm font-semibold text-slate-700 mb-1">Código de Barras</label>
+                 <div className="flex gap-2">
+                    <div className="relative flex-1">
+                        <Barcode className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input
+                            type="text"
+                            value={codigoBarras}
+                            onChange={(e) => setCodigoBarras(e.target.value)}
+                            className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-xl focus:border-indigo-500 transition-all font-mono"
+                            placeholder="Ex: 7891234567890"
+                            maxLength={13}
+                        />
+                    </div>
+                    <button 
+                        onClick={gerarCodigoBarras}
+                        className="px-3 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-600 rounded-xl transition-colors flex items-center justify-center"
+                        title="Gerar código aleatório (789...)"
+                    >
+                        <RefreshCw size={20} />
+                    </button>
+                 </div>
+                 <p className="text-xs text-slate-400 mt-1">Pode ser bipado pelo leitor físico depois.</p>
+            </div>
         </div>
 
         <div className="space-y-4">
@@ -166,6 +222,10 @@ export default function ProdutoModal({ produtoInicial, onClose, onSalvar, isOnli
                 <div className="flex justify-between text-sm mb-1">
                     <span className="text-slate-500">Nome:</span>
                     <span className="font-medium text-slate-800 truncate max-w-[150px]">{nome || '---'}</span>
+                </div>
+                <div className="flex justify-between text-sm mb-1">
+                    <span className="text-slate-500">EAN:</span>
+                    <span className="font-medium text-slate-800 font-mono">{codigoBarras || 'Nenhum'}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                     <span className="text-slate-500">Venda:</span>

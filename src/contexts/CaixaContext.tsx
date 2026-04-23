@@ -112,10 +112,14 @@ export const CaixaProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const abrirCaixa = async (saldoInicial: number) => {
-    const { data: userData } = await supabase.auth.getUser();
-    const user = userData.user;
+    // CORREÇÃO INFALÍVEL: Usar getSession() no lugar de getUser()
+    // Isso permite pegar o usuário que já fez login antes, mesmo sem internet
+    const { data: sessionData } = await supabase.auth.getSession();
+    const user = sessionData.session?.user;
     
-    if (!user || !user.email) throw new Error("Usuário não autenticado");
+    if (!user || !user.email) {
+        throw new Error("Usuário não encontrado na sessão local. Por favor, faça login novamente com internet.");
+    }
 
     const novoCaixaApp: Caixa = {
       id: `local_caixa_${Date.now()}`, 

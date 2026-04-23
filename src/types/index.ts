@@ -40,7 +40,8 @@ export interface Pagamento {
 export interface Comanda {
   id: string;
   numero: number;
-  status: 'aberta' | 'fechada' | 'cancelada'; 
+  // ADICIONADO O STATUS 'fiado' AQUI:
+  status: 'aberta' | 'fechada' | 'cancelada' | 'fiado'; 
   id_cliente?: string;
   cliente?: Cliente;
   itens?: ItemComanda[];
@@ -83,3 +84,19 @@ export interface Sangria {
   data: string;
 }
 
+export interface LogSistema {
+  id: string;
+  usuario_id: string;
+  usuario_nome: string;
+  acao: string;
+  detalhes: string;
+  criado_em: string;
+}
+
+export interface ControleAssinatura {
+  id: string;
+  pago: boolean;
+  mensagem_bloqueio: string;
+  chave_pix: string;
+  atualizado_em?: string;
+}

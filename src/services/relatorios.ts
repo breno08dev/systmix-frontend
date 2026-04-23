@@ -1,5 +1,6 @@
 // src/services/relatorios.ts
 import { supabase } from '../lib/supabaseClient';
+import { db } from '../lib/localDatabase';
 
 export interface ResumoFinanceiro {
   totalGeral: number;
@@ -8,7 +9,7 @@ export interface ResumoFinanceiro {
   totalCartao: number;
   qtdVendas: number;
   ticketMedio: number;
-  totalSangrias: number; // NOVO CAMPO ADICIONADO
+  totalSangrias: number;
 }
 
 export interface ProdutoVendidoDetalhe {
@@ -22,13 +23,10 @@ export interface DetalhamentoRelatorio {
     produtosVendidos: ProdutoVendidoDetalhe[];
 }
 
-// CORREÇÃO: Função agora respeita o horário exato caso receba um Timestamp ISO completo
 const parseDataLocal = (dataStr: string, isFim: boolean = false) => {
-    // Se a data já vier com hora (formato ISO 'T'), nós a utilizamos exatamente como está
     if (dataStr.includes('T')) {
         return new Date(dataStr);
     }
-    
     const [ano, mes, dia] = dataStr.split('-').map(Number);
     if (isFim) {
         return new Date(ano, mes - 1, dia, 23, 59, 59, 999);
@@ -39,53 +37,70 @@ const parseDataLocal = (dataStr: string, isFim: boolean = false) => {
 export const relatoriosService = {
   
   async buscarResumoFinanceiro(isOnline: boolean, dataInicio: string, dataFim: string): Promise<ResumoFinanceiro> {
-    if (!isOnline) {
-       return { totalGeral: 0, totalDinheiro: 0, totalPix: 0, totalCartao: 0, qtdVendas: 0, ticketMedio: 0, totalSangrias: 0 };
-    }
-
     const start = parseDataLocal(dataInicio, false);
     const end = parseDataLocal(dataFim, true);
 
-    // 1. Busca os pagamentos
-    const { data: dataPagamentos, error: errPagamentos } = await supabase
-      .from('pagamentos')
-      .select('valor, metodo')
-      .gte('data', start.toISOString())
-      .lte('data', end.toISOString());
+    let pagamentos: any[] = [];
+    let sangrias: any[] = [];
 
-    if (errPagamentos) {
-        console.error("Erro ao buscar pagamentos:", errPagamentos);
-        throw errPagamentos;
+    if (isOnline) {
+      try {
+          const { data: dataPagamentos, error: errPagamentos } = await supabase
+            .from('pagamentos')
+            .select('id_comanda, valor, metodo')
+            .gte('data', start.toISOString())
+            .lte('data', end.toISOString());
+
+          if (errPagamentos) throw errPagamentos;
+          
+          const { data: dataSangrias, error: errSangrias } = await supabase
+            .from('sangrias')
+            .select('valor')
+            .gte('data', start.toISOString())
+            .lte('data', end.toISOString());
+            
+          if (errSangrias) throw errSangrias;
+
+          pagamentos = dataPagamentos || [];
+          sangrias = dataSangrias || [];
+      } catch (error) {
+          console.warn("Erro ao buscar relatórios online. Recorrendo ao banco local OFF.", error);
+          isOnline = false; 
+      }
+    }
+    
+    if (!isOnline) {
+        // CORREÇÃO: Resgate seguro utilizando TimeStamp para nunca perder a data
+        const startTime = start.getTime();
+        const endTime = end.getTime();
+
+        const comandasLocais = await db.comandas
+            .filter(c => c.status === 'fechada' && !!c.fechado_em && new Date(c.fechado_em).getTime() >= startTime && new Date(c.fechado_em).getTime() <= endTime)
+            .toArray();
+        
+        for (const c of comandasLocais) {
+            // CORREÇÃO VITAL: Buscando pagamentos da tabela separada offline
+            const pagsLocal = await db.pagamentos.where('id_comanda').equals(c.id).toArray();
+            const pagsToUse = pagsLocal.length > 0 ? pagsLocal : (c.pagamentos || []);
+            pagsToUse.forEach(p => pagamentos.push({ id_comanda: c.id, valor: p.valor, metodo: p.metodo }));
+        }
+
+        sangrias = await db.sangrias
+            .filter(s => new Date(s.data).getTime() >= startTime && new Date(s.data).getTime() <= endTime)
+            .toArray();
     }
 
-    // 2. Busca as sangrias do período
-    const { data: dataSangrias, error: errSangrias } = await supabase
-      .from('sangrias')
-      .select('valor')
-      .gte('data', start.toISOString())
-      .lte('data', end.toISOString());
-      
-    if (errSangrias) {
-        console.error("Erro ao buscar sangrias:", errSangrias);
-        throw errSangrias;
-    }
-
-    const pagamentos = dataPagamentos || [];
-    const sangrias = dataSangrias || [];
-
-    // Calcula as retiradas (Sangrias)
     const totalSangrias = sangrias.reduce((acc, curr) => acc + Number(curr.valor), 0);
 
-    // Calcula as entradas
-    let totalDinheiro = pagamentos.filter(p => p.metodo === 'DINHEIRO').reduce((acc, curr) => acc + Number(curr.valor), 0);
-    const totalPix = pagamentos.filter(p => p.metodo === 'PIX').reduce((acc, curr) => acc + Number(curr.valor), 0);
-    const totalCartao = pagamentos.filter(p => p.metodo === 'CARTAO').reduce((acc, curr) => acc + Number(curr.valor), 0);
+    let totalDinheiro = pagamentos.filter(p => p.metodo.includes('DINHEIRO')).reduce((acc, curr) => acc + Number(curr.valor), 0);
+    const totalPix = pagamentos.filter(p => p.metodo.includes('PIX')).reduce((acc, curr) => acc + Number(curr.valor), 0);
+    const totalCartao = pagamentos.filter(p => p.metodo.includes('CARTAO')).reduce((acc, curr) => acc + Number(curr.valor), 0);
         
-    // Desconta a sangria do total de dinheiro físico na gaveta
     totalDinheiro = totalDinheiro - totalSangrias;
-
     const totalGeral = totalDinheiro + totalPix + totalCartao;
-    const qtdVendas = pagamentos.length;
+    
+    const comandasUnicas = new Set(pagamentos.map(p => p.id_comanda));
+    const qtdVendas = comandasUnicas.size;
 
     return {
       totalGeral,
@@ -93,7 +108,6 @@ export const relatoriosService = {
       totalPix,
       totalCartao,
       qtdVendas,
-      // Ticket médio usa valor bruto (recolocamos a sangria na soma para calcular o ticket das vendas)
       ticketMedio: qtdVendas > 0 ? (totalDinheiro + totalSangrias + totalPix + totalCartao) / qtdVendas : 0,
       totalSangrias
     };
@@ -102,35 +116,57 @@ export const relatoriosService = {
   async buscarDetalhamentoRelatorio(isOnline: boolean, dataInicio: string, dataFim: string): Promise<DetalhamentoRelatorio> {
     const resumo = await this.buscarResumoFinanceiro(isOnline, dataInicio, dataFim);
     
-    if (!isOnline) {
-        return { resumo, produtosVendidos: [] };
-    }
-
     const start = parseDataLocal(dataInicio, false);
     const end = parseDataLocal(dataFim, true);
 
-    // Busca itens de comanda criados no período
-    const { data: itensData, error: itensError } = await supabase
-        .from('itens_comanda')
-        .select(`
-            quantidade,
-            valor_unit,
-            produto:id_produto (nome)
-        `)
-        .gte('criado_em', start.toISOString())
-        .lte('criado_em', end.toISOString());
+    let itensData: any[] = [];
 
-    if (itensError) {
-        console.error("Erro ao buscar itens para relatório:", itensError);
-        throw itensError;
+    if (isOnline) {
+      try {
+          const { data, error } = await supabase
+              .from('itens_comanda')
+              .select(`
+                  quantidade,
+                  valor_unit,
+                  produto:id_produto (nome)
+              `)
+              .gte('criado_em', start.toISOString())
+              .lte('criado_em', end.toISOString());
+
+          if (error) throw error;
+          itensData = data || [];
+      } catch (error) {
+          console.warn("Erro ao buscar detalhes de itens online. Recorrendo ao banco local OFF.", error);
+          isOnline = false;
+      }
+    }
+    
+    if (!isOnline) {
+        const startTime = start.getTime();
+        const endTime = end.getTime();
+
+        const comandasLocais = await db.comandas
+            .filter(c => c.status === 'fechada' && !!c.fechado_em && new Date(c.fechado_em).getTime() >= startTime && new Date(c.fechado_em).getTime() <= endTime)
+            .toArray();
+        
+        for (const comanda of comandasLocais) {
+            const itens = await db.itensComanda.where('id_comanda').equals(comanda.id).toArray();
+            for (const item of itens) {
+                const produto = await db.produtos.get(item.id_produto);
+                itensData.push({
+                    quantidade: item.quantidade,
+                    valor_unit: item.valor_unit,
+                    produto: produto ? { nome: produto.nome } : { nome: 'Desconhecido' }
+                });
+            }
+        }
     }
 
     const agrupamento: Record<string, ProdutoVendidoDetalhe> = {};
 
-    itensData?.forEach(item => {
+    itensData.forEach(item => {
         const produtoObj = Array.isArray(item.produto) ? item.produto[0] : item.produto;
         const nomeProduto = produtoObj?.nome || 'Produto Desconhecido';
-        
         const valorTotalItem = item.quantidade * Number(item.valor_unit);
 
         if (agrupamento[nomeProduto]) {

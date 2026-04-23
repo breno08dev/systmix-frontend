@@ -4,6 +4,7 @@ import { ShoppingCart, Wifi, WifiOff, Search, PlusCircle, Clock, ChevronRight, T
 import { comandasService } from '../../services/comandas';
 import { produtosService } from '../../services/produtos';
 import { clientesService } from '../../services/clientes';
+import { logsService } from '../../services/logs'; // Importação do serviço de logs
 import { Comanda, Produto, Cliente } from '../../types';
 import ComandaModal from './ComandaModal'; 
 import { AbrirComandaModal } from './AbrirComandaModal';
@@ -38,8 +39,11 @@ export const PDV: React.FC = () => {
 
   // ESTADOS PARA CONTROLE DE SENHA E EXCLUSÃO DE COMANDA
   const [modalSenhaAberta, setModalSenhaAberta] = useState(false);
-  const [acaoProtegida, setAcaoProtegida] = useState<(() => void) | null>(null);
+  // Atualizado para receber o usuário que autorizou a ação
+  const [acaoProtegida, setAcaoProtegida] = useState<((usuario: {id: string, nome: string}) => void) | null>(null);
   const [modalConfirmaExclusaoId, setModalConfirmaExclusaoId] = useState<string | null>(null);
+  // Estado para armazenar quem autorizou a exclusão temporariamente até confirmar
+  const [quemAutorizou, setQuemAutorizou] = useState<{id: string, nome: string} | null>(null);
 
   const { addToast } = useToast();
   const { isOnline } = useOnlineStatus();
@@ -110,27 +114,43 @@ export const PDV: React.FC = () => {
     ) || 0;
   };
 
-  // ----- LÓGICA DE EXCLUSÃO DE COMANDA COM SENHA -----
-  const solicitarSenha = (acao: () => void) => {
+  // ----- LÓGICA DE EXCLUSÃO DE COMANDA COM SENHA E LOGS -----
+  const solicitarSenha = (acao: (autorizador: {id: string, nome: string}) => void) => {
     setAcaoProtegida(() => acao);
     setModalSenhaAberta(true);
   };
 
   const solicitarExclusaoComanda = (idComanda: string) => {
-    // Pede a senha primeiro. Se acertar, abre o modal de confirmação.
-    solicitarSenha(() => setModalConfirmaExclusaoId(idComanda));
+    // Pede a senha primeiro. Se acertar, armazena quem autorizou e abre o modal de confirmação.
+    solicitarSenha((autorizador) => {
+      setQuemAutorizou(autorizador);
+      setModalConfirmaExclusaoId(idComanda);
+    });
   };
 
   const confirmarExclusaoComanda = async () => {
-    if (!modalConfirmaExclusaoId) return;
+    if (!modalConfirmaExclusaoId || !quemAutorizou) return;
     try {
+      const comandaAExcluir = comandasAbertas.find(c => c.id === modalConfirmaExclusaoId);
+      const numeroComanda = comandaAExcluir ? comandaAExcluir.numero : 'Desconhecida';
+
+      // 1. Exclui a comanda
       await comandasService.excluir(isOnline, modalConfirmaExclusaoId);
+      
+      // 2. Registra a ação nos Logs
+      await logsService.registrar(
+        quemAutorizou,
+        'EXCLUIR_COMANDA',
+        `A comanda de número ${numeroComanda} foi cancelada e excluída permanentemente.`
+      );
+
       addToast('Comanda excluída/cancelada com sucesso!', 'success');
       carregarDados();
     } catch (error: any) {
       addToast(error.message || 'Erro ao excluir comanda.', 'error');
     } finally {
       setModalConfirmaExclusaoId(null);
+      setQuemAutorizou(null);
     }
   };
   // ---------------------------------------------------
@@ -305,17 +325,20 @@ export const PDV: React.FC = () => {
       <ModalSenha 
         isOpen={modalSenhaAberta} 
         onClose={() => setModalSenhaAberta(false)} 
-        onSuccess={() => {
-          if (acaoProtegida) acaoProtegida();
+        onSuccess={(usuario) => {
+          if (acaoProtegida) acaoProtegida(usuario);
         }} 
         titulo="Exclusão Protegida"
-        mensagem="Digite a senha gerencial para excluir/cancelar esta comanda."
+        mensagem="Selecione o usuário e digite a senha gerencial para cancelar esta comanda."
       />
 
       {/* MODAL DARK DE CONFIRMAÇÃO PARA EXCLUIR A COMANDA INTEIRA */}
       <ConfirmacaoModal 
         isOpen={!!modalConfirmaExclusaoId}
-        onClose={() => setModalConfirmaExclusaoId(null)}
+        onClose={() => {
+          setModalConfirmaExclusaoId(null);
+          setQuemAutorizou(null); // Limpa caso o usuário cancele a exclusão
+        }}
         onConfirm={confirmarExclusaoComanda}
         title="Cancelar Comanda"
         message="Tem certeza que deseja cancelar e excluir permanentemente esta comanda?"

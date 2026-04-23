@@ -1,20 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Edit, Trash2, Tag, Lock, Unlock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Tag, Lock, Unlock, ChevronLeft, ChevronRight, User } from 'lucide-react';
 import { produtosService } from '../../services/produtos';
+import { logsService } from '../../services/logs'; // <-- Importando o serviço de logs
 import { Produto } from '../../types';
 import ProdutoModal from './ProdutoModal';
-import {CategoriaModal} from './CategoriaModal'; 
+import { CategoriaModal } from './CategoriaModal'; 
 import { useToast } from '../../contexts/ToastContext';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { ConfirmacaoModal } from '../Common/ConfirmacaoModal';
 
-// --- CONFIGURAÇÃO DA SENHA ---
-const SENHA_MESTRA = '123123'; 
+// --- CONFIGURAÇÃO DOS USUÁRIOS GERENCIAIS ---
+const USUARIOS_GERENCIAIS = [
+  { id: '001', nome: 'Giliard', senha: '2512' },
+  { id: '002', nome: 'Miqueias', senha: '0012' }
+];
+
 const ITENS_POR_PAGINA = 20; // Limite por página
 
 export const Produtos: React.FC = () => {
   // --- ESTADOS DE SEGURANÇA ---
-  const [acessoLiberado, setAcessoLiberado] = useState(false);
+  const [usuarioAutorizado, setUsuarioAutorizado] = useState<{id: string, nome: string} | null>(null);
+  const [usuarioIdInput, setUsuarioIdInput] = useState('');
   const [senhaInput, setSenhaInput] = useState('');
   const [erroSenha, setErroSenha] = useState(false);
 
@@ -22,7 +28,7 @@ export const Produtos: React.FC = () => {
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [termoBusca, setTermoBusca] = useState('');
   const [loading, setLoading] = useState(true);
-  const [paginaAtual, setPaginaAtual] = useState(1); // Estado da paginação
+  const [paginaAtual, setPaginaAtual] = useState(1); 
   
   const [produtoSelecionado, setProdutoSelecionado] = useState<Produto | null>(null);
   const [isProdutoModalOpen, setIsProdutoModalOpen] = useState(false);
@@ -40,14 +46,16 @@ export const Produtos: React.FC = () => {
   // --- FUNÇÕES AUXILIARES ---
   const handleVerificarSenha = (e: React.FormEvent) => {
     e.preventDefault();
-    if (senhaInput === SENHA_MESTRA) {
-      setAcessoLiberado(true);
+    const user = USUARIOS_GERENCIAIS.find(u => u.id === usuarioIdInput && u.senha === senhaInput);
+    
+    if (user) {
+      setUsuarioAutorizado({ id: user.id, nome: user.nome });
       setErroSenha(false);
-      addToast('Acesso autorizado!', 'success');
+      addToast(`Acesso liberado para ${user.nome}!`, 'success');
     } else {
       setErroSenha(true);
       setSenhaInput('');
-      addToast('Senha incorreta.', 'error');
+      addToast('Usuário ou senha incorretos.', 'error');
     }
   };
 
@@ -65,7 +73,7 @@ export const Produtos: React.FC = () => {
 
   // --- EFEITO PRINCIPAL (CARGA + SYNC AUTOMÁTICO) ---
   useEffect(() => {
-    if (acessoLiberado) {
+    if (usuarioAutorizado) {
       carregarProdutos();
 
       const handleSyncComplete = () => {
@@ -79,7 +87,7 @@ export const Produtos: React.FC = () => {
           window.removeEventListener('sync_completed', handleSyncComplete);
       };
     }
-  }, [isOnline, acessoLiberado, carregarProdutos]);
+  }, [isOnline, usuarioAutorizado, carregarProdutos]);
 
   const handleNovoProduto = () => {
     setProdutoSelecionado(null);
@@ -92,9 +100,21 @@ export const Produtos: React.FC = () => {
   };
 
   const handleDeletarProduto = async () => {
-    if (!produtoParaDeletar) return;
+    if (!produtoParaDeletar || !usuarioAutorizado) return;
+    
+    // Encontrar o produto para poder colocar o nome no log
+    const produto = produtos.find(p => p.id === produtoParaDeletar);
+    
     try {
       await produtosService.excluir(isOnline, produtoParaDeletar);
+      
+      // REGISTRO NO LOG DE AUDITORIA
+      await logsService.registrar(
+        usuarioAutorizado,
+        'EXCLUIR_PRODUTO',
+        `Produto excluído do estoque: ${produto?.nome || 'Desconhecido'}.`
+      );
+
       setProdutos(prev => prev.filter(p => p.id !== produtoParaDeletar)); 
       addToast('Produto removido com sucesso!', 'success');
     } catch (error) {
@@ -125,7 +145,7 @@ export const Produtos: React.FC = () => {
   const produtosPaginados = produtosFiltrados.slice(indiceInicial, indiceFinal);
 
   // --- TELA DE BLOQUEIO ---
-  if (!acessoLiberado) {
+  if (!usuarioAutorizado) {
     return (
       <div className="flex flex-col items-center justify-center h-full min-h-[500px] p-6">
         <div className="bg-white p-8 rounded-2xl shadow-lg border border-slate-200 max-w-md w-full text-center">
@@ -134,10 +154,22 @@ export const Produtos: React.FC = () => {
           </div>
           
           <h2 className="text-2xl font-bold text-slate-900 mb-2">Acesso Restrito</h2>
-          <p className="text-slate-500 mb-6">Esta área movimenta o estoque. Digite a senha de segurança para continuar.</p>
+          <p className="text-slate-500 mb-6">Esta área movimenta o estoque. Identifique-se para continuar.</p>
           
           <form onSubmit={handleVerificarSenha} className="space-y-4">
             <div>
+              <select
+                value={usuarioIdInput}
+                onChange={(e) => setUsuarioIdInput(e.target.value)}
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-500 mb-4 bg-white"
+                required
+              >
+                <option value="" disabled>Selecione o Usuário</option>
+                {USUARIOS_GERENCIAIS.map(u => (
+                  <option key={u.id} value={u.id}>{u.id} - {u.nome}</option>
+                ))}
+              </select>
+
               <input
                 type="password"
                 value={senhaInput}
@@ -151,13 +183,13 @@ export const Produtos: React.FC = () => {
                     ? 'border-red-300 focus:ring-red-200 bg-red-50 text-red-900' 
                     : 'border-slate-200 focus:ring-indigo-200 focus:border-indigo-500'
                 }`}
-                autoFocus
               />
             </div>
             
             <button
               type="submit"
-              className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all shadow-md hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2"
+              disabled={!usuarioIdInput || !senhaInput}
+              className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2"
             >
               <Unlock size={20} />
               Liberar Acesso
@@ -174,7 +206,9 @@ export const Produtos: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Catálogo de Produtos</h1>
-          <p className="text-slate-500">Gerencie seu estoque, preços e categorias.</p>
+          <p className="text-slate-500">
+            Operador atual: <span className="font-bold text-indigo-600">{usuarioAutorizado.nome}</span>
+          </p>
         </div>
         
         <div className="flex items-center gap-3">
@@ -310,6 +344,8 @@ export const Produtos: React.FC = () => {
                 carregarProdutos();
             }}
             isOnline={isOnline}
+            // PASSANDO O USUÁRIO LOGADO PARA O MODAL (Adicione essa prop no arquivo ProdutoModal.tsx)
+            usuarioAutorizado={usuarioAutorizado} 
         />
       )}
 

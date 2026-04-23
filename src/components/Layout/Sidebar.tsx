@@ -1,3 +1,4 @@
+// src/components/Layout/Sidebar.tsx
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { 
@@ -10,7 +11,9 @@ import {
   Monitor, 
   Lock, 
   Unlock,
-  History // <--- Adicionado o ícone History
+  History,
+  BookUser,
+  ClipboardList // <--- Ícone adicionado para Logs
 } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { useCaixa } from '../../contexts/CaixaContext';
@@ -32,10 +35,12 @@ export const Sidebar: React.FC = () => {
     { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { path: '/caixa-rapido', icon: ShoppingCart, label: 'Caixa Rápido' },
     { path: '/pdv', icon: Monitor, label: 'Comandas / Mesas' },
+    { path: '/crediario', icon: BookUser, label: 'Crediário (Fiado)' }, 
     { path: '/produtos', icon: Package, label: 'Produtos' },
     { path: '/clientes', icon: Users, label: 'Clientes' },
     { path: '/relatorios', icon: BarChart2, label: 'Relatórios' },
-    { path: '/historico', icon: History, label: 'Histórico' }, // <--- Nova Rota
+    { path: '/historico', icon: History, label: 'Histórico' },
+    { path: '/logs', icon: ClipboardList, label: 'Logs do Sistema' }, // <--- Menu de Logs adicionado
   ];
 
   return (

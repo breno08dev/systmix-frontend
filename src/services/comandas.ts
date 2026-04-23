@@ -19,39 +19,43 @@ const normalizarItem = (item: any): ItemComanda => {
 export const comandasService = {
   
   async listarAbertas(isOnline: boolean): Promise<Comanda[]> {
+    let comandasRemotas: Comanda[] = [];
+
     if (isOnline) {
       try {
         const { data } = await supabase
           .from('comandas')
           .select(`*, cliente:clientes(*), itens:itens_comanda(*, produto:produtos(*))`)
           .eq('status', 'aberta')
-          .order('numero', { ascending: true })
-          .throwOnError(); 
+          .order('numero', { ascending: true });
         
-        const comandas = (data || []).map((c: any) => ({
-            ...c,
-            status: (c.status === 'aberta' || c.status === 'fechada') ? c.status : 'aberta',
-            itens: c.itens ? c.itens.map((i: any) => normalizarItem(i)) : []
-        })) as Comanda[];
+        if (data) {
+            comandasRemotas = data.map((c: any) => ({
+                ...c,
+                status: (c.status === 'aberta' || c.status === 'fechada') ? c.status : 'aberta',
+                itens: c.itens ? c.itens.map((i: any) => normalizarItem(i)) : []
+            })) as Comanda[];
 
-        if (comandas.length > 0) {
-            const comandasParaCache = comandas.map(({ itens: _itens, cliente: _cliente, ...resto }) => ({
-                ...resto,
-                pagamentos: [] 
-            }));
-            await db.comandas.bulkPut(comandasParaCache as any);
-            const todosItens = comandas.flatMap(c => c.itens || []);
-            await db.itensComanda.bulkPut(todosItens as any);
-            const clientesEncontrados = comandas.map(c => c.cliente).filter((c): c is any => !!c);
-            if (clientesEncontrados.length > 0) await db.clientes.bulkPut(clientesEncontrados);
+            if (comandasRemotas.length > 0) {
+                const comandasParaCache = comandasRemotas.map(({ itens: _itens, cliente: _cliente, ...resto }) => ({
+                    ...resto, pagamentos: [] 
+                }));
+                await db.comandas.bulkPut(comandasParaCache as any);
+            }
         }
-        return comandas;
       } catch (err) {
         console.warn("Fallback Offline Comandas:", err);
-        return await localDatabaseService.listarAbertas();
       }
     } 
-    return await localDatabaseService.listarAbertas();
+    
+    // CORREÇÃO CRÍTICA: Busca locais sempre e funde com as remotas para não sumirem no PDV!
+    const comandasLocais = await localDatabaseService.listarAbertas();
+    
+    const mapaComandas = new Map<string, Comanda>();
+    for (const c of comandasLocais) mapaComandas.set(c.id, c);
+    for (const c of comandasRemotas) mapaComandas.set(c.id, c);
+
+    return Array.from(mapaComandas.values()).sort((a, b) => a.numero - b.numero);
   },
 
  async buscarPorId(isOnline: boolean, id: string): Promise<Comanda | null> {
@@ -122,11 +126,10 @@ export const comandasService = {
   async excluir(isOnline: boolean, id: string): Promise<void> {
     if (isOnline && !id.startsWith('local_')) {
         try {
+            await supabase.from('pagamentos').delete().eq('id_comanda', id);
+            await supabase.from('itens_comanda').delete().eq('id_comanda', id);
             const { error } = await supabase.from('comandas').delete().eq('id', id);
             if (error) throw error;
-            await db.comandas.delete(id);
-            await db.itensComanda.where('id_comanda').equals(id).delete();
-            return;
         } catch (e) { console.error("Erro delete online:", e); }
     }
     await localDatabaseService.deletarComanda(id);
@@ -232,7 +235,11 @@ export const comandasService = {
 
 async fecharComanda(isOnline: boolean, idComanda: string, pagamentos: PagamentoInput[], dataFechamentoOffline?: string): Promise<void> {
     const dataFinal = dataFechamentoOffline || new Date().toISOString();
-    const formatarMetodo = (m: string) => m.toUpperCase().includes('DINHEIRO') ? 'DINHEIRO' : (m.toUpperCase().includes('PIX') ? 'PIX' : 'CARTAO');
+    const formatarMetodo = (m: string) => {
+        const upper = m.toUpperCase();
+        const base = upper.includes('DINHEIRO') ? 'DINHEIRO' : (upper.includes('PIX') ? 'PIX' : 'CARTAO');
+        return upper.includes('FIADO') ? `FIADO_${base}` : base;
+    };
 
     const pagamentosFormatados = pagamentos.map(p => ({
         metodo: formatarMetodo(p.metodo),
@@ -246,25 +253,26 @@ async fecharComanda(isOnline: boolean, idComanda: string, pagamentos: PagamentoI
             if (!comanda || comanda.status === 'fechada') return;
 
             if (pagamentos.length > 0) {
-                await supabase.from('pagamentos').insert(pagamentos.map(p => ({
+                await supabase.from('pagamentos').insert(pagamentosFormatados.map(p => ({
                     id_comanda: idComanda,
-                    metodo: formatarMetodo(p.metodo),
+                    metodo: p.metodo,
                     valor: p.valor,
-                    data: dataFinal
+                    data: p.data
                 })));
             }
             
             await supabase.from('comandas').update({ status: 'fechada', fechado_em: dataFinal }).eq('id', idComanda);
             
-            // CORREÇÃO: Salva os pagamentos localmente para renderizar no Histórico imediatamente
             await db.comandas.update(idComanda, { status: 'fechada', fechado_em: dataFinal, pagamentos: pagamentosFormatados as any });
             return;
         } catch (e) { console.error("Erro fecharComanda online:", e); }
     }
-    await localDatabaseService.fecharComanda(idComanda, pagamentos);
+    await localDatabaseService.fecharComanda(idComanda, pagamentosFormatados);
   },
 
   async listarFechadasTurno(isOnline: boolean, dataAbertura: string): Promise<Comanda[]> {
+    let comandasRemotas: Comanda[] = [];
+
     if (isOnline) {
       try {
         const { data } = await supabase
@@ -274,15 +282,15 @@ async fecharComanda(isOnline: boolean, idComanda: string, pagamentos: PagamentoI
           .gte('fechado_em', dataAbertura)
           .order('fechado_em', { ascending: false });
         
-        if (data && data.length > 0) return data as Comanda[];
+        if (data) comandasRemotas = data as Comanda[];
       } catch (e) {
         console.error("Erro ao buscar histórico:", e);
       }
     }
     
-    // CORREÇÃO: Fallback Local (Busca do banco do navegador caso internet caia / atrase sincronização)
+    const tempoAbertura = new Date(dataAbertura).getTime();
     const comandasLocais = await db.comandas
-        .filter(c => c.status === 'fechada' && (c.fechado_em || '') >= dataAbertura)
+        .filter(c => c.status === 'fechada' && !!c.fechado_em && new Date(c.fechado_em).getTime() >= tempoAbertura)
         .toArray();
         
     for (const c of comandasLocais) {
@@ -295,37 +303,32 @@ async fecharComanda(isOnline: boolean, idComanda: string, pagamentos: PagamentoI
             const cli = await db.clientes.get(c.id_cliente);
             if (cli) c.cliente = cli;
         }
-        // Garante que se fechou vazia ou offline tenha como renderizar
-        c.pagamentos = c.pagamentos || []; 
+        
+        const pagsOffline = await db.pagamentos.where('id_comanda').equals(c.id).toArray();
+        if (pagsOffline.length > 0) {
+            c.pagamentos = pagsOffline as any;
+        } else {
+            c.pagamentos = c.pagamentos || []; 
+        }
     }
     
-    // Retorna ordenando as mais recentes primeiro
-    return comandasLocais.sort((a, b) => (b.fechado_em || '').localeCompare(a.fechado_em || '')) as Comanda[];
+    const mapaComandas = new Map<string, Comanda>();
+    for (const c of comandasLocais) mapaComandas.set(c.id, c);
+    for (const c of comandasRemotas) mapaComandas.set(c.id, c);
+    
+    return Array.from(mapaComandas.values()).sort((a, b) => (b.fechado_em || '').localeCompare(a.fechado_em || ''));
   },
 
  async cancelarComandaFechada(isOnline: boolean, idComanda: string): Promise<void> {
-    // 1. Tenta excluir do banco de dados remoto (Supabase)
     if (isOnline && !idComanda.startsWith('local_')) {
       try {
-        // Exclui os pagamentos vinculados para sair do relatório financeiro
         await supabase.from('pagamentos').delete().eq('id_comanda', idComanda);
-        
-        // Exclui os itens da comanda
         await supabase.from('itens_comanda').delete().eq('id_comanda', idComanda);
-        
-        // Por fim, exclui a comanda em si
         await supabase.from('comandas').delete().eq('id', idComanda);
       } catch (e) {
         console.error("Erro ao excluir venda do banco de dados remoto:", e);
       }
     }
-
-    // 2. Exclui do banco local (Front-end / IndexedDB) independentemente de estar online ou não
-    try {
-      await db.comandas.delete(idComanda);
-      await db.itensComanda.where('id_comanda').equals(idComanda).delete();
-    } catch (e) {
-      console.error("Erro ao excluir venda do banco de dados local:", e);
-    }
+    await localDatabaseService.deletarComanda(idComanda);
   }
 };

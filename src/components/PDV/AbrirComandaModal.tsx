@@ -30,9 +30,11 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
   
   const { addToast } = useToast(); 
 
+  // CORREÇÃO: Só mostra resultados SE houver algo digitado
   const clientesFiltrados = useMemo(() => {
-    if (!buscaCliente) return clientes.slice(0, 10);
-    const termo = buscaCliente.toLowerCase();
+    if (!buscaCliente.trim()) return []; 
+    
+    const termo = buscaCliente.toLowerCase().trim();
     return clientes.filter(c => 
       c.nome.toLowerCase().includes(termo) ||
       (c.telefone && c.telefone.includes(termo))
@@ -51,17 +53,14 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
           return;
         }
         
-        // Cria e recebe o objeto cliente completo
         const novoCliente = await clientesService.criar(isOnline, {
           nome: novoClienteNome,
           telefone: novoClienteTelefone || undefined,
         });
         
-        // Casting se necessário conforme seu tipo
         clienteParaPassar = novoCliente as Cliente; 
       }
       
-      // Chama a função do pai com todos os dados
       onComandaAberta(numeroComanda, clienteParaPassar?.id, clienteParaPassar);
       
     } catch (error: any) {
@@ -131,7 +130,9 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
             </div>
 
             <div className="max-h-48 overflow-y-auto border border-slate-100 rounded-xl bg-slate-50 p-1">
-              {clientesFiltrados.length === 0 ? (
+              {buscaCliente.trim() === '' ? (
+                  <p className="text-center text-slate-400 py-4 text-sm">Digite um nome ou telefone para buscar.</p>
+              ) : clientesFiltrados.length === 0 ? (
                   <p className="text-center text-slate-400 py-4 text-sm">Nenhum cliente encontrado.</p>
               ) : (
                   clientesFiltrados.map(cliente => (
@@ -146,7 +147,9 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
                     >
                       <div>
                           <p className="font-bold text-sm">{cliente.nome}</p>
-                          <p className={`text-xs ${clienteSelecionado?.id === cliente.id ? 'text-indigo-200' : 'text-slate-400'}`}>{cliente.telefone || 'Sem telefone'}</p>
+                          <p className={`text-xs ${clienteSelecionado?.id === cliente.id ? 'text-indigo-200' : 'text-slate-400'}`}>
+                              {cliente.telefone || 'Sem telefone'}
+                          </p>
                       </div>
                       {clienteSelecionado?.id === cliente.id && <CheckCircle size={16} />}
                     </button>
@@ -156,11 +159,11 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
 
             <div className="pt-2 border-t border-slate-100">
                 <button
-                onClick={() => setModoNovoCliente(true)}
-                className="w-full py-3 flex items-center justify-center gap-2 text-indigo-600 font-semibold bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors border border-indigo-100"
+                  onClick={() => setModoNovoCliente(true)}
+                  className="w-full py-3 flex items-center justify-center gap-2 text-indigo-600 font-semibold bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-colors border border-indigo-100"
                 >
-                <UserPlus size={18} />
-                Cadastrar Novo Cliente
+                  <UserPlus size={18} />
+                  Cadastrar Novo Cliente
                 </button>
             </div>
           </div>
@@ -179,23 +182,23 @@ export const AbrirComandaModal: React.FC<AbrirComandaModalProps> = ({
             <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Nome Completo *</label>
                 <input
-                type="text"
-                value={novoClienteNome}
-                onChange={(e) => setNovoClienteNome(e.target.value)}
-                className="w-full p-3 border border-slate-200 rounded-xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                placeholder="Ex: João Silva"
-                autoFocus
+                  type="text"
+                  value={novoClienteNome}
+                  onChange={(e) => setNovoClienteNome(e.target.value)}
+                  className="w-full p-3 border border-slate-200 rounded-xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  placeholder="Ex: João Silva"
+                  autoFocus
                 />
             </div>
             
             <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1">Telefone (Opcional)</label>
                 <input
-                type="text"
-                value={novoClienteTelefone}
-                onChange={(e) => setNovoClienteTelefone(e.target.value)}
-                className="w-full p-3 border border-slate-200 rounded-xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                placeholder="(00) 00000-0000"
+                  type="text"
+                  value={novoClienteTelefone}
+                  onChange={(e) => setNovoClienteTelefone(e.target.value)}
+                  className="w-full p-3 border border-slate-200 rounded-xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                  placeholder="(00) 00000-0000"
                 />
             </div>
 

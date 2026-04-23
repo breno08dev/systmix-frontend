@@ -1,3 +1,4 @@
+// src/lib/localDatabase.ts
 import Dexie, { Table } from 'dexie';
 import { Comanda, ItemComanda, Produto, Cliente, PagamentoInput, Sangria } from '../types';
 
@@ -188,7 +189,9 @@ export const localDatabaseService = {
                  }
                  comanda.pagamentos = await db.pagamentos.where('id_comanda').equals(comanda.id).toArray();
             }));
-            return comandasLocais;
+
+            // CORREÇÃO 1: Garante que as comandas não embaralhem quando estiver Offline!
+            return comandasLocais.sort((a, b) => a.numero - b.numero);
         });
     });
   },
@@ -306,9 +309,40 @@ export const localDatabaseService = {
 
   async deletarComanda(id: string): Promise<void> {
     await executeWithRetry(async () => {
-        await db.transaction('rw', db.comandas, db.itensComanda, async () => {
-            await db.itensComanda.where('id_comanda').equals(id).delete();
+        await db.transaction('rw', [db.comandas, db.itensComanda, db.pagamentos, db.pending_actions], async () => {
+            // 1. Deleta a comanda e seus dependentes do banco local
+            try { await db.itensComanda.where('id_comanda').equals(id).delete(); } catch(e) {}
+            try { await db.pagamentos.where('id_comanda').equals(id).delete(); } catch(e) {}
             await db.comandas.delete(id);
+
+            // 2. LÓGICA ANTI-FANTASMA (AQUI ESTÁ A CORREÇÃO)
+            if (id.startsWith('local_')) {
+                // Se a comanda for local, varremos a fila de sincronização e apagamos 
+                // qualquer ação (Criar comanda, adicionar item) relacionada a ela.
+                const actions = await db.pending_actions.toArray();
+                const idsToDelete = actions.filter(a => {
+                    const p = a.payload;
+                    return p && (
+                        p.id === id || 
+                        p.idTemp === id || 
+                        p.tempId === id || 
+                        p.id_comanda === id || 
+                        p.idComanda === id
+                    );
+                }).map(a => a.id!);
+                
+                if (idsToDelete.length > 0) {
+                    await db.pending_actions.bulkDelete(idsToDelete);
+                }
+            } else {
+                // Se não for local, ela já existe no Supabase, então avisa a fila para excluir lá depois
+                await db.pending_actions.add({
+                    type: 'EXCLUIR_COMANDA',
+                    payload: { id },
+                    criado_em: Date.now(),
+                    tentativas: 0
+                });
+            }
         });
     });
   },

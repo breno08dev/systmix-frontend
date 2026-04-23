@@ -14,6 +14,30 @@ interface SyncContextData {
 
 const SyncContext = createContext<SyncContextData>({} as SyncContextData);
 
+// CORREÇÃO CRÍTICA: Vacina Anti-Amnésia. Substitui o ID temporário pelo ID real em TODA A FILA.
+const updatePendingActionsId = async (oldId: string, newId: string) => {
+    if (!oldId || !newId || oldId === newId) return;
+    
+    const actions = await db.pending_actions.toArray();
+    for (const action of actions) {
+        let changed = false;
+        let p = JSON.parse(JSON.stringify(action.payload));
+        
+        const fieldsToCheck = ['idComanda', 'id_comanda', 'idCliente', 'id_cliente', 'idItem', 'id_item', 'id_produto', 'id', 'id_caixa', 'idTemp', 'tempId'];
+        
+        fieldsToCheck.forEach(field => {
+            if (p[field] === oldId) {
+                p[field] = newId;
+                changed = true;
+            }
+        });
+
+        if (changed && action.id) {
+            await db.pending_actions.update(action.id, { payload: p });
+        }
+    }
+};
+
 const otimizarFila = (actions: PendingAction[]) => {
     const optimized: PendingAction[] = [];
     const updateMap = new Map<string, number>();
@@ -90,8 +114,10 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             'CRIAR_PRODUTO': 1, 'ATUALIZAR_PRODUTO': 1,
             'CRIAR_COMANDA': 2, 'ADICIONAR_ITEM': 3,
             'ATUALIZAR_QTD_ITEM': 4, 'REMOVER_ITEM': 5, 'FECHAR_COMANDA': 6,
+            'ATUALIZAR_COMANDA_FIADO': 6,
             'CRIAR_SANGRIA': 6,
-            'FECHAR_CAIXA': 7 
+            'FECHAR_CAIXA': 7,
+            'EXCLUIR_COMANDA': 8
         };
         const pA = priority[a.type] || 99;
         const pB = priority[b.type] || 99;
@@ -129,7 +155,6 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let payload = JSON.parse(JSON.stringify(action.payload));
     let shouldRemoveAction = true; 
 
-    // Mapeamento automático de IDs (inclui o id_caixa)
     const fieldsToCheck = ['idComanda', 'id_comanda', 'idCliente', 'id_cliente', 'idItem', 'id_item', 'id_produto', 'id', 'id_caixa'];
     fieldsToCheck.forEach(field => {
         if (payload[field] && idMap[payload[field]]) {
@@ -155,6 +180,7 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
                 if (data && tempId) {
                     idMap[tempId] = data.id;
+                    await updatePendingActionsId(tempId, data.id); // Aplica a vacina
                     
                     const cached = localStorage.getItem('systmix_caixa_aberto');
                     if (cached) {
@@ -170,58 +196,41 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           case 'CRIAR_SANGRIA':
             const idCaixaSangria = payload.id_caixa;
-            
             if (idCaixaSangria && String(idCaixaSangria).startsWith('local_')) {
                 shouldRemoveAction = false;
                 break;
             }
-
             try {
                 const { id: tempIdSangria, id_caixa, valor, motivo, data } = payload;
-                
                 const { error } = await supabase.from('movimentacoes_caixa').insert([{
-                    id_caixa: id_caixa, 
-                    tipo: 'sangria',
-                    valor: valor,
-                    motivo: motivo,
-                    data: data 
+                    id_caixa: id_caixa, tipo: 'sangria', valor: valor, motivo: motivo, data: data 
                 }]);
-
                 if (error) throw error;
-
-                if (tempIdSangria) {
-                    await db.sangrias.delete(tempIdSangria).catch(() => {});
-                }
-            } catch (err) { 
-                shouldRemoveAction = false; 
-            }
+                if (tempIdSangria) await db.sangrias.delete(tempIdSangria).catch(() => {});
+            } catch (err) { shouldRemoveAction = false; }
             break;
 
           case 'FECHAR_CAIXA':
             if (payload.id && !String(payload.id).startsWith('local_')) {
                 try {
                     const { error } = await supabase.from('caixas').update({
-                        aberto: false,
-                        fechado_em: payload.fechado_em,
-                        saldo_atual: payload.saldoFinal,
+                        aberto: false, fechado_em: payload.fechado_em, saldo_atual: payload.saldoFinal,
                     }).eq('id', payload.id);
                     if (error) throw error;
                 } catch (e) { shouldRemoveAction = false; }
-            } else { 
-                shouldRemoveAction = false; 
-            }
+            } else { shouldRemoveAction = false; }
             break;
 
           case 'CRIAR_CLIENTE':
             try {
                 const { id: tempId, criado_em, ...dados } = payload.cliente;
                 const novo = await clientesService.criar(true, dados);
-                
                 if (novo.id && String(novo.id).startsWith('local_')) {
                     shouldRemoveAction = false;
                     await db.clientes.delete(novo.id).catch(() => {});
                 } else if (novo && tempId) {
                     idMap[tempId] = novo.id;
+                    await updatePendingActionsId(tempId, novo.id); // Aplica a vacina
                     await db.clientes.delete(tempId).catch(() => {});
                 }
             } catch (err) { shouldRemoveAction = false; }
@@ -229,9 +238,7 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           case 'ATUALIZAR_CLIENTE':
             if (payload.id && !String(payload.id).startsWith('local_')) {
-                try {
-                    await clientesService.atualizar(true, payload.id, payload.cliente);
-                } catch (e) { shouldRemoveAction = false; }
+                try { await clientesService.atualizar(true, payload.id, payload.cliente); } catch (e) { shouldRemoveAction = false; }
             } else { shouldRemoveAction = false; }
             break;
 
@@ -239,12 +246,12 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             try {
                 const { id: tempId, criado_em, ...dados } = payload.produto;
                 const novo = await produtosService.criar(true, dados);
-                
                 if (novo.id && String(novo.id).startsWith('local_')) {
                     shouldRemoveAction = false;
                     await db.produtos.delete(novo.id).catch(() => {});
                 } else if (novo && tempId) {
                     idMap[tempId] = novo.id;
+                    await updatePendingActionsId(tempId, novo.id); // Aplica a vacina
                     await db.produtos.delete(tempId).catch(() => {});
                 }
             } catch (err) { shouldRemoveAction = false; }
@@ -252,9 +259,7 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           case 'ATUALIZAR_PRODUTO':
             if (payload.id && !String(payload.id).startsWith('local_')) {
-                try {
-                    await produtosService.atualizar(true, payload.id, payload.produto);
-                } catch (e) { shouldRemoveAction = false; }
+                try { await produtosService.atualizar(true, payload.id, payload.produto); } catch (e) { shouldRemoveAction = false; }
             } else { shouldRemoveAction = false; }
             break;
 
@@ -269,23 +274,16 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
             try {
                 const nova = await comandasService.criarComanda(true, payload.numero, idCli);
-                
-                if (nova.id && String(nova.id).startsWith('local_')) {
-                    await db.comandas.delete(nova.id).catch(() => {});
-                    const { data: existente } = await supabase.from('comandas').select('id').eq('numero', payload.numero).eq('status', 'aberta').maybeSingle();
-                    if (existente) {
-                        if (tempIdCom) idMap[tempIdCom] = existente.id;
-                        if (idCli && !String(idCli).startsWith('local_')) {
-                            await supabase.from('comandas').update({ id_cliente: idCli }).eq('id', existente.id);
-                        }
-                        if (tempIdCom) await db.comandas.delete(tempIdCom).catch(() => {});
-                        shouldRemoveAction = true;
-                    } else {
-                        shouldRemoveAction = false;
+                if (nova.id && !String(nova.id).startsWith('local_')) {
+                    if (tempIdCom) {
+                        idMap[tempIdCom] = nova.id;
+                        await updatePendingActionsId(tempIdCom, nova.id); // Vacina Anti-Amnésia garante o fechamento!
+                        await db.comandas.delete(tempIdCom).catch(() => {});
                     }
+                    shouldRemoveAction = true;
                 } else if (nova && tempIdCom) {
                     idMap[tempIdCom] = nova.id;
-                    await db.comandas.delete(tempIdCom).catch(() => {});
+                    shouldRemoveAction = false;
                 }
             } catch (err) { shouldRemoveAction = false; }
             break;
@@ -312,6 +310,7 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                         const tempIdItem = payload.id;
                         if (tempIdItem && String(tempIdItem).startsWith('local_')) {
                             idMap[tempIdItem] = item.id;
+                            await updatePendingActionsId(tempIdItem, item.id); // Aplica a vacina
                             await db.itensComanda.delete(tempIdItem).catch(() => {});
                         }
                     }
@@ -324,9 +323,7 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           case 'ATUALIZAR_QTD_ITEM':
              if (payload.id_item && !String(payload.id_item).startsWith('local_')) {
-                 try {
-                     await comandasService.atualizarQuantidadeItem(true, payload.id_comanda, payload.id_item, Number(payload.quantidade));
-                 } catch (e) { shouldRemoveAction = false; }
+                 try { await comandasService.atualizarQuantidadeItem(true, payload.id_comanda, payload.id_item, Number(payload.quantidade)); } catch (e) { shouldRemoveAction = false; }
              } else { shouldRemoveAction = false; }
              break;
 
@@ -340,10 +337,28 @@ export const SyncProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           case 'FECHAR_COMANDA':
              if (payload.idComanda && !String(payload.idComanda).startsWith('local_')) {
+                 try { await comandasService.fecharComanda(true, payload.idComanda, payload.pagamentos, payload.dataFechamento); } catch (e) { shouldRemoveAction = false; }
+             } else { shouldRemoveAction = false; }
+             break;
+             
+          case 'ATUALIZAR_COMANDA_FIADO':
+             if (payload.id && !String(payload.id).startsWith('local_')) {
                  try {
-                     await comandasService.fecharComanda(true, payload.idComanda, payload.pagamentos, payload.dataFechamento);
+                     const { error } = await supabase.from('comandas').update({ status: 'fiado', fechado_em: payload.fechado_em }).eq('id', payload.id);
+                     if (error) throw error;
                  } catch (e) { shouldRemoveAction = false; }
              } else { shouldRemoveAction = false; }
+             break;
+
+          case 'EXCLUIR_COMANDA':
+             if (payload.id && !String(payload.id).startsWith('local_')) {
+                 try {
+                     await supabase.from('pagamentos').delete().eq('id_comanda', payload.id);
+                     await supabase.from('itens_comanda').delete().eq('id_comanda', payload.id);
+                     const { error } = await supabase.from('comandas').delete().eq('id', payload.id);
+                     if (error) throw error;
+                 } catch (e) { shouldRemoveAction = false; }
+             } else { shouldRemoveAction = true; } 
              break;
         }
     } catch (e) {
